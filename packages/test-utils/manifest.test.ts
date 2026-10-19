@@ -26,6 +26,13 @@ describe("verifyShipManifest", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
+	it("matches explicit nested manifest paths on Windows and POSIX", () => {
+		makePackage(dir, ["audio/worker.ts"], ["audio/worker.ts"]);
+		const result = verifyShipManifest(dir);
+		expect(result.onDisk).toEqual(["audio/worker.ts"]);
+		expect(result.missing).toEqual([]);
+	});
+
 	it("covers nested files via a trailing-slash directory entry", () => {
 		makePackage(dir, ["index.ts", "runner/"], ["index.ts", "runner/runner.ts", "runner/step.ts"]);
 		expect(verifyShipManifest(dir).missing).toEqual([]);

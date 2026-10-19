@@ -42,3 +42,6 @@ packages/*/.astro/
 # packages-level rule above doesn't cover the case of running Astro from the
 # monorepo root (e.g. via a workspace script), so ignore the root cache too.
 /.astro/
+
+# Python STT worker/test bytecode
+__pycache__/

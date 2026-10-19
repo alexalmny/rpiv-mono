@@ -53,15 +53,14 @@ export function isEqualizerEnabled(config: { equalizerEnabled?: boolean }): bool
  * (`audio/stt-engine.ts`) imports it as its constructor fallback and the
  * settings row shows it, so the two surfaces cannot diverge. 4 threads is the
  * sweet spot for Whisper base on a modern multi-core CPU per upstream tuning
- * guidance (whisper.cpp benchmarks; the sherpa-onnx ORT thread pool follows
- * the same pattern) — more shows diminishing returns and can starve other Pi
+ * guidance — more shows diminishing returns and can starve other Pi
  * work on smaller machines.
  */
 export const DEFAULT_NUM_THREADS = 4;
 
 /**
  * Decode-thread ceiling. 16 covers the best datapoint measured while
- * investigating issue #200 and bounds ONNX Runtime intra-op thread
+ * investigating issue #200 and bounds CPU thread
  * oversubscription — beyond it, extra threads only add contention.
  */
 export const MAX_NUM_THREADS = 16;

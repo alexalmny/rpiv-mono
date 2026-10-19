@@ -2,7 +2,7 @@
 	"name": "@juicesharp/rpiv-voice",
 	"version": "2.13.9",
 	"private": false,
-	"description": "Pi extension. Voice dictation via /voice — local on-device STT with sherpa-onnx Whisper (base multilingual int8), microphone capture via decibri.",
+	"description": "Pi voice dictation with local faster-whisper Base (CUDA INT8/FP16 or CPU INT8).",
 	"keywords": [
 		"pi-package",
 		"pi-extension",
@@ -10,7 +10,7 @@
 		"voice",
 		"dictation",
 		"stt",
-		"sherpa-onnx",
+		"faster-whisper",
 		"overlay"
 	],
 	"type": "module",
@@ -18,12 +18,12 @@
 	"author": "juicesharp",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/juicesharp/rpiv-mono.git",
+		"url": "git+https://github.com/alexalmny/rpiv-mono.git",
 		"directory": "packages/rpiv-voice"
 	},
-	"homepage": "https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-voice#readme",
+	"homepage": "https://github.com/alexalmny/rpiv-mono/tree/faster-whisper-base/packages/rpiv-voice",
 	"bugs": {
-		"url": "https://github.com/juicesharp/rpiv-mono/issues"
+		"url": "https://github.com/alexalmny/rpiv-mono/issues"
 	},
 	"publishConfig": {
 		"access": "public"
@@ -36,10 +36,8 @@
 		"audio/error-log.ts",
 		"audio/hallucination-filter.ts",
 		"audio/mic-source.ts",
-		"audio/model-download.ts",
 		"audio/pcm.ts",
 		"audio/resampler.ts",
-		"audio/sherpa-onnx-node.d.ts",
 		"audio/stt-engine.ts",
 		"command/pipeline-runner.ts",
 		"command/splash-runner.ts",
@@ -74,7 +72,9 @@
 		"!docs/*.svg",
 		"README.md",
 		"CHANGELOG.md",
-		"LICENSE"
+		"LICENSE",
+		"audio/faster-whisper-worker.py",
+		"requirements.txt"
 	],
 	"pi": {
 		"image": "https://raw.githubusercontent.com/juicesharp/rpiv-mono/main/packages/rpiv-voice/docs/cover.png",
@@ -84,7 +84,6 @@
 	},
 	"dependencies": {
 		"@juicesharp/rpiv-config": "^2.13.9",
-		"sherpa-onnx-node": "^1.13.0",
 		"decibri": "^3.4.0"
 	},
 	"peerDependencies": {

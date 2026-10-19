@@ -1,9 +1,6 @@
-// Post-recognition filter for Whisper's well-known silence/near-silence
-// hallucinations. sherpa-onnx-node (and sherpa-onnx itself) don't expose the
-// openai-whisper decoder thresholds — `no_speech_threshold`,
-// `logprob_threshold`, `compression_ratio_threshold` — so we filter the
-// output instead. Combined with the input-side RMS gate this catches the
-// long tail without an engine swap.
+// Keep the upstream phrase/repetition filter alongside faster-whisper's
+// decoder thresholds and the pipeline's input-side RMS gate: short live
+// partials can still hallucinate on silence.
 
 // Phrases Whisper emits as the *entire* output of a quiet segment. Matched
 // against the normalized form (lowercase, punctuation+symbols stripped, whitespace

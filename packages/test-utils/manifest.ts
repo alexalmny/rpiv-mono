@@ -109,7 +109,7 @@ function walkProductionTs(root: string, dir: string): string[] {
 		}
 		if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
 		if (entry.name.endsWith(".test.ts") || SKIP_FILES.has(entry.name)) continue;
-		out.push(relative(root, abs));
+		out.push(relative(root, abs).replaceAll("\\", "/"));
 	}
 	return out;
 }

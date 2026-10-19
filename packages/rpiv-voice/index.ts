@@ -1,6 +1,6 @@
 /**
  * rpiv-voice — Pi extension. Registers the `/voice` command for local voice
- * dictation backed by sherpa-onnx Whisper.
+ * dictation backed by faster-whisper Base.
  *
  * UI strings localize at render time via the i18n bridge. Strings are
  * registered with rpiv-i18n here, once, at module init — but only when the
@@ -16,8 +16,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { releaseAllSttEngines } from "./audio/stt-engine.ts";
 import { registerVoiceCommand } from "./command/voice-command.ts";
-import { I18N_NAMESPACE } from "./state/i18n-bridge.ts";
+import { I18N_NAMESPACE, OPTIONAL_I18N_PACKAGE } from "./state/i18n-bridge.ts";
 
 type I18nLoader = {
 	registerLocalesFromDir: (namespace: string, packageUrl: string, options?: { label?: string }) => void;
@@ -31,7 +32,7 @@ type I18nLoader = {
 // The `/loader` subpath is used instead of the SDK entry so the i18n-ui +
 // pi-tui modules are not pulled into our load graph just to register strings.
 try {
-	const sdk = (await import("@juicesharp/rpiv-i18n/loader")) as I18nLoader;
+	const sdk = (await import(`${OPTIONAL_I18N_PACKAGE}/loader`)) as I18nLoader;
 	sdk.registerLocalesFromDir(I18N_NAMESPACE, import.meta.url, { label: "rpiv-voice" });
 } catch {
 	// SDK absent — extension still loads with English-only UI.
@@ -39,4 +40,5 @@ try {
 
 export default function (pi: ExtensionAPI): void {
 	registerVoiceCommand(pi);
+	pi.on("session_shutdown", () => releaseAllSttEngines());
 }

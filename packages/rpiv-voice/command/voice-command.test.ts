@@ -5,23 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // vi.hoisted to declare shared spies in the same hoisted phase so the mock
 // factories can close over them without a TDZ error.
 const mocks = vi.hoisted(() => {
-	const ensureModelDownloaded = vi.fn();
-	const isModelDownloaded = vi.fn(() => true);
-	const assertModelIntact = vi.fn();
-	const removeModelInstall = vi.fn();
-	const getModelPaths = vi.fn(() => ({
-		encoderPath: "/m/encoder.onnx",
-		decoderPath: "/m/decoder.onnx",
-		tokensPath: "/m/tokens.txt",
-	}));
-	class ModelInstallError extends Error {
-		constructor(
-			public readonly stage: "download" | "extract" | "verify",
-			cause: unknown,
-		) {
-			super(`install failed: ${stage}`, { cause: cause as Error });
-		}
-	}
 	const sttEngineRelease = vi.fn();
 	const createSttEngine = vi.fn(async () => ({
 		recognize: vi.fn(async () => ""),
@@ -54,12 +37,6 @@ const mocks = vi.hoisted(() => {
 		this.tickPulse = vi.fn();
 	});
 	return {
-		ensureModelDownloaded,
-		isModelDownloaded,
-		assertModelIntact,
-		removeModelInstall,
-		getModelPaths,
-		ModelInstallError,
 		sttEngineRelease,
 		createSttEngine,
 		createMic,
@@ -75,15 +52,6 @@ vi.mock("./splash-runner.ts", () => ({
 		const controller = { setPhase: vi.fn() };
 		return await work(controller);
 	}),
-}));
-
-vi.mock("../audio/model-download.ts", () => ({
-	ensureModelDownloaded: mocks.ensureModelDownloaded,
-	isModelDownloaded: mocks.isModelDownloaded,
-	assertModelIntact: mocks.assertModelIntact,
-	removeModelInstall: mocks.removeModelInstall,
-	getModelPaths: mocks.getModelPaths,
-	ModelInstallError: mocks.ModelInstallError,
 }));
 
 vi.mock("../audio/stt-engine.ts", () => ({ createSttEngine: mocks.createSttEngine }));
@@ -119,11 +87,6 @@ vi.mock("../state/i18n-bridge.ts", () => ({
 }));
 
 const {
-	ensureModelDownloaded,
-	isModelDownloaded,
-	assertModelIntact,
-	removeModelInstall,
-	ModelInstallError,
 	sttEngineRelease,
 	createSttEngine,
 	createMic,
@@ -219,10 +182,6 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 	beforeEach(() => {
 		// Re-establish happy-path defaults each test so per-test overrides are
 		// the only divergence from green.
-		isModelDownloaded.mockReturnValue(true);
-		ensureModelDownloaded.mockReset();
-		assertModelIntact.mockReset();
-		removeModelInstall.mockReset();
 		createSttEngine.mockReset().mockResolvedValue({
 			recognize: vi.fn(async () => ""),
 			release: sttEngineRelease,
@@ -231,61 +190,6 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 		startDictationPipeline.mockClear();
 		sttEngineRelease.mockClear();
 		sessionState.done = undefined;
-	});
-
-	it("download stage → notifies model_download_failed key", async () => {
-		isModelDownloaded.mockReturnValue(false);
-		ensureModelDownloaded.mockRejectedValueOnce(new ModelInstallError("download", new Error("net")));
-		const { handler } = captureHandler();
-		const { ctx, notify } = makeCtx();
-		await handler("", ctx);
-		expect(notify).toHaveBeenCalledWith("error.model_download_failed", "error");
-	});
-
-	it("extract stage → notifies model_extract_failed key", async () => {
-		isModelDownloaded.mockReturnValue(false);
-		ensureModelDownloaded.mockRejectedValueOnce(new ModelInstallError("extract", new Error("tar")));
-		const { handler } = captureHandler();
-		const { ctx, notify } = makeCtx();
-		await handler("", ctx);
-		expect(notify).toHaveBeenCalledWith("error.model_extract_failed", "error");
-	});
-
-	it("verify stage → notifies model_verify_failed key", async () => {
-		isModelDownloaded.mockReturnValue(false);
-		ensureModelDownloaded.mockRejectedValueOnce(new ModelInstallError("verify", new Error("missing")));
-		const { handler } = captureHandler();
-		const { ctx, notify } = makeCtx();
-		await handler("", ctx);
-		expect(notify).toHaveBeenCalledWith("error.model_verify_failed", "error");
-	});
-
-	it("non-ModelInstallError during download → falls back to engine_load_failed", async () => {
-		// Bare Error (not ModelInstallError) hits the `?? "download"` fallback
-		// inside runPreflight's catch.
-		isModelDownloaded.mockReturnValue(false);
-		ensureModelDownloaded.mockRejectedValueOnce(new Error("opaque"));
-		const { handler } = captureHandler();
-		const { ctx, notify } = makeCtx();
-		await handler("", ctx);
-		expect(notify).toHaveBeenCalledWith("error.model_download_failed", "error");
-	});
-
-	it("stale install (assertModelIntact throws) wipes the install and notifies model_stale_install", async () => {
-		assertModelIntact.mockImplementationOnce(() => {
-			throw new Error("missing onnx");
-		});
-		const { handler } = captureHandler();
-		const { ctx, notify } = makeCtx();
-		await handler("", ctx);
-		// Recovery: the corrupt install is wiped so the next launch redownloads.
-		expect(removeModelInstall).toHaveBeenCalledOnce();
-		// User-facing copy must be the stale-install message — not the generic
-		// engine_load_failed fallback. This guards a regression where the outer
-		// catch around assertModelIntact + createSttEngine flattened every
-		// inner PreflightError back to PreflightError("engine") and made the
-		// `case "stale_install"` arm of preflightUserMessage unreachable.
-		expect(notify).toHaveBeenCalledWith("error.model_stale_install", "error");
 	});
 
 	it("engine load failure → notifies engine_load_failed", async () => {
@@ -304,13 +208,21 @@ describe("handleVoiceCommand — preflight error mapping", () => {
 		expect(sttEngineRelease).toHaveBeenCalledOnce();
 		expect(notify).toHaveBeenCalledWith("error.mic_unavailable", "error");
 	});
+	it("releases the engine and microphone when the session UI throws", async () => {
+		const { handler } = captureHandler();
+		const { ctx } = makeCtx();
+		ctx.ui.custom.mockRejectedValueOnce(new Error("UI closed"));
+		await expect(handler("", ctx)).rejects.toThrow("UI closed");
+		expect(sttEngineRelease).toHaveBeenCalledOnce();
+		const mic = await createMic.mock.results[0].value;
+		expect(mic.stop).toHaveBeenCalledOnce();
+	});
+
 });
 
 // ── Whisper language hint, driven via getActiveLocale → createSttEngine ─────
 describe("handleVoiceCommand — whisper language hint", () => {
 	beforeEach(() => {
-		isModelDownloaded.mockReturnValue(true);
-		assertModelIntact.mockReset();
 		createSttEngine.mockReset().mockResolvedValue({
 			recognize: vi.fn(async () => ""),
 			release: sttEngineRelease,
@@ -357,8 +269,6 @@ describe("handleVoiceCommand — whisper language hint", () => {
 // ── Happy path: commit dispatch → pasteToEditor ─────────────────────────────
 describe("handleVoiceCommand — happy path", () => {
 	beforeEach(() => {
-		isModelDownloaded.mockReturnValue(true);
-		assertModelIntact.mockReset();
 		createSttEngine.mockReset().mockResolvedValue({
 			recognize: vi.fn(async () => ""),
 			release: sttEngineRelease,
@@ -401,34 +311,12 @@ describe("handleVoiceCommand — happy path", () => {
 		expect(pasteToEditor).not.toHaveBeenCalled();
 	});
 
-	it("skips download path when isModelDownloaded() is true", async () => {
-		const { handler } = captureHandler();
-		const { ctx } = makeCtx();
-		const run = handler("", ctx);
-		await waitForSessionDone();
-		sessionState.done?.({ intent: "cancel", transcript: "" });
-		await run;
-		expect(ensureModelDownloaded).not.toHaveBeenCalled();
-	});
 
-	it("invokes ensureModelDownloaded when isModelDownloaded() is false", async () => {
-		isModelDownloaded.mockReturnValue(false);
-		ensureModelDownloaded.mockResolvedValueOnce(undefined);
-		const { handler } = captureHandler();
-		const { ctx } = makeCtx();
-		const run = handler("", ctx);
-		await waitForSessionDone();
-		sessionState.done?.({ intent: "cancel", transcript: "" });
-		await run;
-		expect(ensureModelDownloaded).toHaveBeenCalledOnce();
-	});
 });
 
 // ── numThreads wiring: one config load → engine construction ────────────────
 describe("handleVoiceCommand — numThreads wiring", () => {
 	beforeEach(() => {
-		isModelDownloaded.mockReturnValue(true);
-		assertModelIntact.mockReset();
 		createSttEngine.mockReset().mockResolvedValue({
 			recognize: vi.fn(async () => ""),
 			release: sttEngineRelease,
@@ -482,8 +370,6 @@ describe("handleVoiceCommand — numThreads wiring", () => {
 // ── Commit drain & teardown ordering ────────────────────────────────────────
 describe("handleVoiceCommand — commit drain & teardown ordering", () => {
 	beforeEach(() => {
-		isModelDownloaded.mockReturnValue(true);
-		assertModelIntact.mockReset();
 		createSttEngine.mockReset().mockResolvedValue({
 			recognize: vi.fn(async () => ""),
 			release: sttEngineRelease,

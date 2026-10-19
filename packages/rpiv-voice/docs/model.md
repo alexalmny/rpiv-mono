@@ -1,137 +1,43 @@
-# Model install and platform support
+# faster-whisper Base runtime and model
 
-What the first `/voice` downloads, where it puts it, what your machine needs for that to
-work, and how a broken install recovers.
+This fork replaces upstream sherpa-onnx and its ONNX Base archive with the CTranslate2 implementation provided by faster-whisper. The model is **multilingual Base**, not `base.en`.
 
-## First run
+## Dependencies
 
-The first time you run `/voice`, a splash overlay walks through the install before the
-dictation screen opens:
+- Python 3.10+ with compatible binary wheels, and `faster-whisper==1.2.1`; install the package's `requirements.txt` into your chosen interpreter.
+- Existing Node/Decibri microphone capture dependencies, unchanged.
+- Optional NVIDIA GPU with compatible CUDA/cuDNN libraries. CPU inference requires no CUDA.
 
-| Phase | What you see |
-| --- | --- |
-| Download | `Downloading Whisper… 43% (85.2 MB / 198.1 MB)` — percent and byte counter, or a bare byte counter if the server sends no `Content-Length` |
-| Extract | `Extracting model files…` |
-| Verify | `Verifying model files…` |
-| Load | `Loading speech model…` |
-| Microphone | `Initializing microphone…` |
+No Python environment, installer, PyTorch download, system FFmpeg installation or tar extraction is created/run by the extension. PyAV is an upstream faster-whisper dependency, even though this worker accepts PCM directly.
 
-Every later run skips straight to `Loading speech model…`.
+## Model download and cache
 
-## What gets downloaded
+The worker first resolves `Systran/faster-whisper-base` in the standard Hugging Face cache with `local_files_only=True`. If the cache is unavailable it shows a download phase and calls faster-whisper's model downloader. Expect approximately **148 MB** for model weights, tokenizer, vocabulary and configuration. INT8 compute does not shrink the standard model download.
 
-One archive, from the sherpa-onnx project's GitHub release assets:
+On a default setup the cache is under `~/.cache/huggingface/hub/models--Systran--faster-whisper-base/`. Hugging Face's `HF_HOME`/`HF_HUB_CACHE` overrides are respected. The extension never deletes or rewrites another application's cached model to repair a failure. It does not touch `~/.pi/models/whisper-base/` from upstream.
 
-```
-https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-base.tar.bz2
-```
+After a complete cache download, inference requires no network. For strict offline operation, launch Pi with `HF_HUB_OFFLINE=1`; a missing cache then fails instead of downloading. Startup errors go to `~/.config/rpiv-voice/errors.log` and the overlay closes with an error notification. Repair missing/corrupt model files through the Hugging Face tooling rather than deleting shared caches automatically.
 
-This is the only outbound request the package makes. There is no telemetry, no analytics,
-and no other network call anywhere in the code. After the model is on disk, `/voice`
-works fully offline.
+## Worker and acceleration
 
-## Where it lands
+One Python subprocess is started when `/voice` opens. It loads Base once, warms up inference, then accepts FIFO-serialized mono 16 kHz float32 audio requests over private stdin/stdout pipes. There is no HTTP server or listening port. Each audio request is bounded to 30 seconds; rpiv's existing segment cap is 12 seconds.
 
-```
-~/.pi/models/whisper-base/
-├── base-encoder.int8.onnx
-├── base-decoder.int8.onnx
-├── base-tokens.txt
-└── .download-complete
-```
+The worker chooses CUDA `int8_float16` when a usable NVIDIA GPU exists, otherwise CPU `int8`. GPU warmup failures trigger CPU fallback. A GPU failure during transcription retries that same request on CPU and keeps subsequent requests on CPU. Backend selection/fallback is written to the diagnostic log.
 
-That path is hardcoded. `XDG_CONFIG_HOME` and `PI_CODING_AGENT_DIR` do not move it.
+On Windows, if Torch is installed, its `lib` directory is added to DLL lookup and the worker's PATH without importing Torch. This can reuse already-installed CUDA libraries; no CUDA download is performed. Compatibility is still checked by actual inference, not merely by detecting a GPU.
 
-The upstream archive ships fp32 and int8 weights side by side. `/voice` runs int8 on the
-CPU, so `base-encoder.onnx` and `base-decoder.onnx` are deleted right after extraction.
-The archive itself is deleted too.
+The default executable is `python` from Pi's PATH. Set `RPIV_VOICE_PYTHON` to a full executable path if necessary. `numThreads` controls CPU threads. Startup is bounded to five minutes (including any first download), and an individual decode to one minute. Commit drain keeps the existing ten-second UI bound. Closing/cancelling the session or shutting down Pi terminates the worker and rejects outstanding requests.
 
-| Measurement | Size |
-| --- | --- |
-| Archive on the wire | ~198 MB |
-| On disk after pruning | ~157 MB |
+## Recognition settings
 
-Peak transient usage is far higher than the final figure. The archive is deleted only
-after extraction finishes, and the fp32 weights are pruned only after that — so at the
-peak the archive (~198 MB), the fp32 pair (~290 MB) and the int8 pair (~155 MB) all sit
-in the directory at once. Budget ~650 MB of free space for the first run.
+- `beam_size=1`, `best_of=1`, `temperature=0` for low-latency greedy decoding.
+- `condition_on_previous_text=False` to keep independent phrase/partial decodes independent.
+- `word_timestamps=False` because the UI consumes text only.
+- `vad_filter=False` because Decibri and the existing pipeline already perform voice/silence segmentation.
+- Language follows rpiv-i18n when installed; otherwise Whisper auto-detects per utterance.
 
-`.download-complete` is the sentinel: its presence is what makes later runs skip the
-download entirely.
-
-## Recovery from a broken install
-
-The download, extract and verify stages report distinct failures rather than collapsing
-into one message:
-
-| Failure | Message |
-| --- | --- |
-| Fetch or HTTP error | `Failed to download STT model. Check your internet connection.` |
-| `tar` failed | `Downloaded STT model archive is corrupt. Please retry.` |
-| A required file is missing after extract | `STT model files are incomplete after download. Please retry.` |
-| A required file disappeared after a previously good install | `STT model files were removed or corrupted. They will be redownloaded on next launch.` |
-| The recognizer refused to load | `Failed to load STT model.` |
-
-Any install failure wipes `~/.pi/models/whisper-base/` before surfacing, so a retry always
-starts from a clean slate rather than resuming a half-extracted directory.
-
-The sentinel only proves a *past* run finished. Before loading the engine, `/voice`
-re-checks that the three required files still exist — if something deleted one of them,
-the directory is wiped and the next launch redownloads, instead of crashing inside the
-native recognizer.
-
-## System requirements
-
-**`tar` with bzip2 support.** Extraction shells out to
-`tar -xjf <archive> -C <dir> --strip-components=1`. You need a `tar` on `PATH` that
-supports `-j` and GNU-style `--strip-components`. There is no JavaScript fallback. The
-system `tar` on macOS, mainstream Linux distributions and Windows 10+ qualifies.
-
-**A microphone the OS will hand to your terminal.** On macOS that means granting your
-terminal application microphone access under System Settings → Privacy & Security →
-Microphone. Without it, preflight stops at
-`Microphone unavailable. Check that an input device is connected and that Pi has
-microphone permission.`
-
-**An interactive Pi session.** `/voice` draws a TUI overlay; in a non-interactive context
-it reports `/voice requires interactive mode` and exits.
+These settings trade some beam-search accuracy for responsiveness. There is no claim that CTranslate2 is faster than sherpa-onnx on every device.
 
 ## Platforms
 
-Both native dependencies ship prebuilt binaries. The intersection is what actually runs:
-
-| Platform | `sherpa-onnx-node` | `decibri` | `/voice` |
-| --- | --- | --- | --- |
-| macOS Apple Silicon (arm64) | yes | yes | yes |
-| macOS Intel (x64) | yes | **no** | no |
-| Linux x64, glibc | yes | yes | yes |
-| Linux arm64, glibc | yes | yes | yes |
-| Linux musl (Alpine) | no | no | no |
-| Windows x64 | yes | yes | yes |
-| Windows ia32 | yes | no | no |
-
-The gap that catches people is Intel Macs: `decibri` publishes no `darwin-x64` binary, so
-microphone capture has nothing to load there even though the speech engine would run.
-
-Linux builds link against glibc — there is no musl variant, so Alpine-based images are
-out.
-
-`decibri` requires Node 18 or newer.
-
-## Microphone capture strategies
-
-Capture is negotiated at startup, and which strategy won is recorded in
-`~/.config/rpiv-voice/errors.log` under the `mic.path` scope:
-
-1. **`silero-passthrough@16000Hz`** — 16 kHz capture with decibri's bundled Silero VAD.
-   Preferred: Silero's ML-based voice detection handles noisy rooms considerably better
-   than an energy threshold. Works on USB headsets, AirPods and most external mics.
-2. **`resample-rms@<rate>Hz`** — if the device refuses 16 kHz (macOS built-in
-   microphones commonly do), capture reopens at the device's native rate — 48 kHz,
-   then 44.1 kHz, then 96 kHz — resamples to 16 kHz in JavaScript, and substitutes an
-   RMS-energy gate for Silero, which only accepts 8 or 16 kHz input.
-
-Both strategies use a 500 ms hangover before declaring silence, which covers a natural
-breath pause without flushing mid-clause. Segments are additionally force-flushed at a
-12-second cap; the cut point is the lowest-energy chunk in the trailing 800 ms, so long
-monologues split mid-breath rather than mid-syllable.
+The unchanged Decibri 3.x capture binaries support Windows x64, Apple Silicon macOS and glibc Linux x64/arm64. Intel macOS and musl Linux remain unsupported by capture. faster-whisper/CTranslate2/PyAV binary-wheel support must also be available for the chosen Python/platform combination. GPU acceleration is optional; Apple Silicon uses CPU, not CUDA.

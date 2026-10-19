@@ -22,8 +22,8 @@ const CAP_CUT_SCAN_MS = 800;
 const CAP_CUT_SCAN_SAMPLES = (TARGET_SAMPLE_RATE * CAP_CUT_SCAN_MS) / 1000;
 
 // Whisper hallucinates filler ("Thanks for watching", "♪", "1/2 1/2…") on
-// near-silent input. sherpa-onnx-node doesn't expose the decoder thresholds
-// that would suppress this, so we gate at the input: skip segments whose mean
+// near-silent input. Keep the input gate as well as the decoder's thresholds:
+// skip segments whose mean
 // RMS is below a floor. ~-46 dBFS sits between room noise and quiet speech.
 const MIN_SEGMENT_RMS = 0.005;
 

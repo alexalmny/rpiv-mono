@@ -23,8 +23,8 @@ surfaced, not masked.
 
 Writes only ever go to the XDG-resolved path.
 
-`XDG_CONFIG_HOME` is the only environment variable this package reads. It relocates
-`voice.json` and nothing else — not the error log, not the model directory.
+`XDG_CONFIG_HOME` relocates `voice.json`, not the diagnostic log.
+`RPIV_VOICE_PYTHON` selects the Python executable; Hugging Face variables control the model cache/offline policy. See [model.md](./model.md).
 
 ## Keys
 
@@ -32,7 +32,7 @@ Writes only ever go to the XDG-resolved path.
 | --- | --- | --- | --- |
 | `hallucinationFilterEnabled` | boolean | `true` | Drops Whisper's silence artifacts and repetition loops. Turn it off when you are dictating single words the filter might mistake for noise |
 | `equalizerEnabled` | boolean | `false` | Renders the live audio waveform lattice under the transcript |
-| `numThreads` | integer | `4` | Decode threads for the sherpa-onnx recognizer. JSON-only — the settings screen shows it read-only; re-run `/voice` to apply a change |
+| `numThreads` | integer | `4` | Decode threads for the CTranslate2 CPU recognizer. JSON-only — the settings screen shows it read-only; re-run `/voice` to apply a change |
 
 There are no other keys. A hand-written file looks like this:
 
@@ -96,12 +96,15 @@ That path is hardcoded — unlike `voice.json`, it does **not** move when you se
 `XDG_CONFIG_HOME`. One line per event, ISO timestamp first:
 
 ```
-2026-03-04T09:12:44.118Z [stt.recognize] Error: <sherpa-onnx message>
+2026-03-04T09:12:44.118Z [stt.recognize] Error: <faster-whisper message>
 2026-03-04T09:12:40.902Z [mic.path] resample-rms@48000Hz
 ```
 
 | Scope | Meaning |
 | --- | --- |
+| `stt.backend` | Selected model/device and any GPU-to-CPU fallback reason |
+| `stt.preflight.engine` | Python, dependency, model download or engine startup failure |
+| `stt.preflight.mic` | Microphone startup failure |
 | `stt.recognize` | A final segment failed to decode. The transcript skips it |
 | `stt.recognize.partial` | A rolling partial decode failed. Harmless — the next one retries |
 | `stt.decode` | Latency breadcrumb: one line per completed decode (final or partial) with its wall-clock duration and sample count. Informational |
@@ -116,8 +119,7 @@ trail — check it first when a phrase silently fails to transcribe.
 
 - **Microphone.** `/voice` uses the OS default input device. There is no device picker
   and no config key for one.
-- **Model.** The bundled Whisper base multilingual int8 model is the only option; the
-  file names are fixed. See [model.md](./model.md).
+- **Model.** Multilingual Whisper Base is the fixed model; compute is CUDA INT8/FP16 or CPU INT8. See [model.md](./model.md).
 - **Recognition language.** It is derived from your active i18n locale at the moment
   `/voice` starts, and is fixed for that session — see below.
 - **Command flags.** `/voice` ignores any arguments you type after it.
@@ -139,7 +141,7 @@ built-in per-utterance auto-detect across the full multilingual model.
 
 ## How the decode thread count is chosen
 
-`numThreads` sets how many threads sherpa-onnx may use to decode audio. The value is
+`numThreads` sets how many CPU threads CTranslate2 may use to decode audio. The value is
 resolved once, when `/voice` starts, and baked into the recognizer for the whole session —
 editing `voice.json` mid-session does nothing until the next run.
 
@@ -151,5 +153,4 @@ The rules are applied silently — no warning is printed for a rejected value:
   `1` (`0`, negative) — falls back to `4`.
 
 The default of `4` mirrors the engine's built-in fallback. `16` is the ceiling because it
-covers the measured best datapoint while bounding ORT intra-op oversubscription on
-smaller machines.
+bounds CPU thread oversubscription on smaller machines.

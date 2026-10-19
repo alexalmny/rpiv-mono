@@ -18,6 +18,8 @@
  * `const X = t(...)`.
  */
 
+// Nonliteral imports keep the SDK optional during standalone typechecking too.
+export const OPTIONAL_I18N_PACKAGE = "@juicesharp/rpiv-i18n";
 export const I18N_NAMESPACE = "@juicesharp/rpiv-voice";
 
 type ScopeFn = (key: string, fallback: string) => string;
@@ -39,7 +41,7 @@ type I18nSDK = {
 let scopeImpl: ScopeFn;
 let activeLocaleImpl: LocaleFn;
 try {
-	const sdk = (await import("@juicesharp/rpiv-i18n")) as I18nSDK;
+	const sdk = (await import(OPTIONAL_I18N_PACKAGE)) as I18nSDK;
 	scopeImpl = sdk.scope(I18N_NAMESPACE);
 	activeLocaleImpl = sdk.getActiveLocale;
 } catch {

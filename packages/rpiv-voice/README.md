@@ -1,129 +1,66 @@
-# @juicesharp/rpiv-voice
+# rpiv-voice — faster-whisper Base fork
 
-[![npm version](https://img.shields.io/npm/v/@juicesharp/rpiv-voice.svg)](https://www.npmjs.com/package/@juicesharp/rpiv-voice)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+This fork keeps [rpiv-voice](https://github.com/juicesharp/rpiv-mono)'s `/voice` interface and Decibri microphone capture, replacing sherpa-onnx with **faster-whisper and multilingual Whisper Base**.
 
-<div align="center">
-  <a href="https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-voice">
-    <picture>
-      <img src="https://raw.githubusercontent.com/juicesharp/rpiv-mono/main/packages/rpiv-voice/docs/cover.png" alt="rpiv-voice cover: a mocked /voice overlay showing a live transcript, an equalizer strip, and the status row" width="50%">
-    </picture>
-  </a>
-</div>
+- Local speech recognition: microphone audio is never uploaded.
+- One Python worker stays model-loaded for the entire dictation session, including live partial previews.
+- Automatically uses NVIDIA CUDA with `int8_float16`, or CPU `int8` if CUDA initialization or inference fails.
+- On Windows, reuses CUDA/cuDNN DLLs from an installed Torch package when available, without importing Torch.
+- Greedy decoding (`beam_size=1`), no word timestamps, no previous-segment conditioning, and no redundant second VAD pass.
+- Existing live preview, hallucination filter, pause, settings and review-before-send behavior remain intact.
 
-Dictate long prompts to [Pi Agent](https://github.com/badlogic/pi-mono) instead of typing
-them. `rpiv-voice` adds a `/voice` command: an overlay opens, you speak, you press
-`Enter`, and the transcript drops into Pi's editor. Speech-to-text runs on your own CPU
-through sherpa-onnx Whisper (base multilingual int8) — no cloud, no API key, no account.
+## Install from a checkout
 
-## Install
+Requires Pi, Node.js 22+, Python 3.10+ with compatible faster-whisper wheels, and microphone access. Windows x64, Apple Silicon macOS and glibc Linux x64/arm64 are supported by the existing capture dependency; Python-wheel availability must also match your platform. CUDA acceleration is optional.
+
+From `packages/rpiv-voice`:
 
 ```sh
-pi install npm:@juicesharp/rpiv-voice
+python -m pip install -r requirements.txt
+npm ci --workspaces=false --omit=dev --legacy-peer-deps
+pi install .
 ```
 
-Restart your Pi session.
+Pi supplies its own host packages. Restart Pi after installing, then run `/voice`.
+This uses your selected/shared Python installation: **no virtual environment is created** and the extension never runs pip automatically.
 
-## Quick start
+If Pi's `python` is not the interpreter containing faster-whisper, set `RPIV_VOICE_PYTHON` to the full executable path before starting Pi. It is an executable path, not a shell command.
 
-Type `/voice`. The first run downloads the Whisper model (~198 MB, ~157 MB on disk) into
-`~/.pi/models/whisper-base/` with a progress splash; later runs open in about a second.
+The first run uses an existing Hugging Face cached `Systran/faster-whisper-base` model if present; otherwise it downloads approximately **148 MB** of model/tokenizer files. Subsequent inference is offline. The model cache respects the Hugging Face environment variables; it is not the upstream sherpa model directory.
 
-Then talk. Committed text appears as you finish phrases, with a dim trailing partial for
-the sentence you are still speaking.
-
-![The /voice overlay above the Pi prompt: a committed transcript line, a teal divider, and the status row reading 0:14 with the Enter, Space, Tab and Esc hints](https://raw.githubusercontent.com/juicesharp/rpiv-mono/main/packages/rpiv-voice/docs/overlay.jpg)
+## Use
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Close the overlay and paste the transcript — committed text plus the dim partial |
-| `Esc` | Close the overlay and paste nothing |
-| `Space` | Pause / resume |
-| `Tab` | Open the settings screen |
+| `/voice` | Open dictation |
+| Enter | Finish dictation and paste the transcript into Pi's editor; does not send it |
+| Esc | Discard dictation |
+| Space | Pause/resume transcription |
+| Tab | Open settings |
 
-If you have remapped Pi's confirm/cancel keys, the overlay follows your remap.
+Pi's remapped confirm/cancel keys are respected. Live partials update about once a second; phrase boundaries commit final text. The model is loaded when `/voice` opens and released when it closes. Shutdown/reload also terminates active workers.
 
-## What you get
+## Settings and diagnostics
 
-- **Audio never leaves your machine** — the only network call in the package is the
-  one-time model download from GitHub Releases. Decoding runs locally on the CPU. No API
-  key, no account, no telemetry.
-- **You see the words before you commit them** — the still-open utterance is re-decoded
-  about once a second and rendered dim after the committed text, and `Enter` pastes both.
-  You never wait on a final decode.
-- **Long monologues stay responsive** — pauses flush a segment, and a cap keeps a
-  non-stop stretch from stalling the transcript.
-- **Built-in microphones work, not just headsets** — capture falls back to the device's
-  native sample rate when 16 kHz is refused.
-- **Whisper's silence hallucinations get filtered** — a curated phrase set
-  ("thanks for watching", "music", "applause", and non-English equivalents), a
-  repetition-loop detector, and an input-side energy floor. Toggle it off when you are
-  dictating single words.
-- **Localized UI in nine languages** — `de`, `en`, `es`, `fr`, `pt`, `pt-BR`, `ru`, `uk`,
-  `zh`. With [`@juicesharp/rpiv-i18n`](https://www.npmjs.com/package/@juicesharp/rpiv-i18n)
-  installed, `/languages` flips the overlay strings without a restart; without it the
-  extension still loads, English-only.
+Settings are unchanged: `~/.config/rpiv-voice/voice.json` (or the XDG config path) supports `hallucinationFilterEnabled`, `equalizerEnabled` and JSON-only `numThreads` (default 4, range 1–16). Threads primarily affect CPU inference.
 
-## Configuration
+Language follows the optional rpiv-i18n locale, or is auto-detected per utterance if that package is absent. The multilingual Base model is fixed.
 
-`/voice` needs no config file. The two toggles are editable on the settings screen (`Tab`
-from dictation, `Ctrl-S` to save, `Esc` to save silently and go back) and persist to
-`~/.config/rpiv-voice/voice.json`; `numThreads` is JSON-only — the settings screen shows
-it read-only, so hand-edit the file and re-run `/voice` to apply a change:
+`~/.config/rpiv-voice/errors.log` records the selected backend (`faster-whisper base cuda` or `cpu`), fallback reasons, startup errors and decode latency. Raw microphone audio and transcripts are not logged by this extension. CPU fallback may be slower; this is not a guarantee that every machine beats upstream sherpa-onnx.
 
-| Key | Default | Effect |
-| --- | --- | --- |
-| `hallucinationFilterEnabled` | `true` | Drops Whisper's silence artifacts and repetition loops |
-| `equalizerEnabled` | `false` | Renders the live audio waveform under the transcript |
-| `numThreads` | `4` | Decode threads for the Whisper recognizer — integer `1`–`16`; below `1` (or any invalid value) falls back to the default `4`, above `16` clamps to `16`. JSON-only, applied on the next `/voice` run |
+See [configuration](docs/configuration.md), [keys](docs/keybindings.md), and [model/runtime setup](docs/model.md).
 
-The file is written with mode `0600`.
+## Development
 
-The microphone is the OS default input and the model is fixed — neither is selectable.
+With the monorepo's development dependencies installed:
 
-## Reference
+```sh
+npx vitest run --config vitest.voice.config.ts
+python test/faster-whisper-worker.test.py
+```
 
-- [Configuration](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-voice/docs/configuration.md) — every key, the XDG path rules, file permissions, the diagnostic log, and how the recognition language is chosen.
-- [Keys and screens](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-voice/docs/keybindings.md) — the full key table for both screens, the remappable bindings, and exactly what `Enter` pastes and `Space` pauses.
-- [Model install and platform support](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-voice/docs/model.md) — the first-run pipeline, the files on disk, failure recovery, and the prebuilt-binary matrix.
-
-## Requirements
-
-- **Apple Silicon macOS, glibc Linux (x64 / arm64), or Windows x64.** Intel Macs are not
-  supported: the `decibri` capture library publishes no `darwin-x64` binary. Alpine/musl
-  is out for the same reason.
-- **A microphone Pi is allowed to use.** On macOS, grant your terminal microphone access
-  under System Settings → Privacy & Security → Microphone.
-- **`tar` with bzip2 support on `PATH`** — model extraction shells out to `tar -xjf`.
-- **~650 MB free** during the first run — the archive and the unused fp32 weights are
-  only deleted after extraction finishes. Settles at ~157 MB.
-- **Network access on the first run only.** After that, `/voice` is fully offline.
-
-## Troubleshooting
-
-- **`Microphone unavailable…` error notification** — the OS refused the input device.
-  Grant your terminal microphone permission, confirm an input device is connected, then
-  re-run `/voice`.
-- **`/voice requires interactive mode`** — the command draws a TUI overlay and does
-  nothing in a non-interactive session. Run `/voice` from an interactive Pi session.
-- **The transcript says "Thanks for watching"** — Whisper hallucinated on near-silence.
-  Speak closer to the microphone, and leave `hallucinationFilterEnabled` on.
-- **A phrase silently failed to transcribe** — recognition errors are appended to
-  `~/.config/rpiv-voice/errors.log` rather than printed, because stderr would corrupt the
-  live overlay. Check there for the underlying sherpa-onnx error.
-- **`/voice` is not found** — restart your Pi session after installing.
-- **`STT model files were removed or corrupted…`** — the install directory was damaged
-  after a good download. It is wiped automatically; run `/voice` again to redownload.
-
-## Related
-
-- [`@juicesharp/rpiv-i18n`](https://www.npmjs.com/package/@juicesharp/rpiv-i18n) —
-  optional. Install it with `pi install npm:@juicesharp/rpiv-i18n` to localize the
-  overlay and enable `/languages`.
-- [`@juicesharp/rpiv-pi`](https://www.npmjs.com/package/@juicesharp/rpiv-pi) — the
-  umbrella package and `/rpiv-setup`. It does not install `rpiv-voice`; this package is
-  opt-in and installed explicitly.
+The voice-only test setup does not initialize unrelated monorepo extensions. Python tests use fake inference backends and never download models.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-voice/LICENSE).
+MIT, retaining upstream attribution. faster-whisper and its model/runtime dependencies have their own licenses.
