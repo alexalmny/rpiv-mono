@@ -1,7 +1,7 @@
 import { DynamicBorder, type Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings } from "@earendil-works/pi-tui";
-import type { VoiceConfig } from "../config/voice-config.ts";
-import { loadVoiceConfig, resolveNumThreads, saveVoiceConfig } from "../config/voice-config.ts";
+import type { VoiceConfig, VoiceShortcut } from "../config/voice-config.ts";
+import { loadVoiceConfig, resolveNumThreads, resolveVoiceShortcut, saveVoiceConfig } from "../config/voice-config.ts";
 import { globalBinding } from "../view/component-binding.ts";
 import { EqualizerView } from "../view/components/equalizer-view.ts";
 import { SettingsFieldView } from "../view/components/settings-field-view.ts";
@@ -20,6 +20,9 @@ import {
 	selectLanguageReadonlyFieldProps,
 	selectMicReadonlyFieldProps,
 	selectNumThreadsReadonlyFieldProps,
+	selectKeepModelLoadedFieldProps,
+	selectPreloadModelFieldProps,
+	selectVoiceShortcutFieldProps,
 	selectStatusBarProps,
 	selectTranscriptProps,
 } from "./selectors/projections.ts";
@@ -39,6 +42,7 @@ export interface VoiceSessionConfig {
 	tui: { terminal: { columns: number; rows?: number }; requestRender(): void };
 	theme: Theme;
 	persistedConfig: VoiceConfig;
+	shortcut?: VoiceShortcut;
 	deps: VoiceSessionDeps;
 	done: (result: VoiceResult) => void;
 }
@@ -51,6 +55,7 @@ export interface VoiceSessionComponent {
 
 export class VoiceSession {
 	private state: VoiceState;
+	private readonly shortcut: VoiceShortcut;
 	private readonly adapter: VoiceOverlayPropsAdapter;
 	private readonly overlay: OverlayView;
 	private readonly tui: VoiceSessionConfig["tui"];
@@ -62,6 +67,7 @@ export class VoiceSession {
 
 	constructor(config: VoiceSessionConfig) {
 		this.tui = config.tui;
+		this.shortcut = config.shortcut ?? resolveVoiceShortcut(config.persistedConfig);
 		this.deps = config.deps;
 		this.done = config.done;
 		this.state = initialVoiceState(
@@ -79,8 +85,11 @@ export class VoiceSession {
 		const hallucinationField = new SettingsFieldView(config.theme);
 		const equalizerField = new SettingsFieldView(config.theme);
 		const numThreadsField = new SettingsFieldView(config.theme);
+		const keepModelLoadedField = new SettingsFieldView(config.theme);
+		const preloadModelField = new SettingsFieldView(config.theme);
+		const voiceShortcutField = new SettingsFieldView(config.theme);
 		const settingsForm = new SettingsFormView({
-			fields: [micField, languageField, hallucinationField, equalizerField, numThreadsField],
+			fields: [micField, languageField, hallucinationField, equalizerField, numThreadsField, keepModelLoadedField, preloadModelField, voiceShortcutField],
 		});
 
 		const dictation = new DictationScreenStrategy({ transcript, divider, equalizer, statusBar });
@@ -103,6 +112,9 @@ export class VoiceSession {
 			globalBinding({ component: hallucinationField, select: selectHallucinationFilterFieldProps }),
 			globalBinding({ component: equalizerField, select: selectEqualizerFieldProps }),
 			globalBinding({ component: numThreadsField, select: selectNumThreadsReadonlyFieldProps }),
+			globalBinding({ component: keepModelLoadedField, select: selectKeepModelLoadedFieldProps }),
+			globalBinding({ component: preloadModelField, select: selectPreloadModelFieldProps }),
+			globalBinding({ component: voiceShortcutField, select: selectVoiceShortcutFieldProps }),
 			globalBinding({ component: this.overlay, select: (state) => ({ state }) }),
 		];
 
@@ -185,7 +197,7 @@ export class VoiceSession {
 	}
 
 	private runtime() {
-		return { keybindings: getKeybindings() };
+		return { keybindings: getKeybindings(), shortcut: this.shortcut };
 	}
 
 	private applyContext(): ApplyContext {

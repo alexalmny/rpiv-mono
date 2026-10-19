@@ -39,6 +39,7 @@
 		"audio/pcm.ts",
 		"audio/resampler.ts",
 		"audio/stt-engine.ts",
+		"audio/stt-cache.ts",
 		"command/pipeline-runner.ts",
 		"command/splash-runner.ts",
 		"command/voice-command.ts",

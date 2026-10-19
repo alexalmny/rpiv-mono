@@ -33,8 +33,11 @@ Writes only ever go to the XDG-resolved path.
 | `hallucinationFilterEnabled` | boolean | `true` | Drops Whisper's silence artifacts and repetition loops. Turn it off when you are dictating single words the filter might mistake for noise |
 | `equalizerEnabled` | boolean | `false` | Renders the live audio waveform lattice under the transcript |
 | `numThreads` | integer | `4` | Decode threads for the CTranslate2 CPU recognizer. JSON-only — the settings screen shows it read-only; re-run `/voice` to apply a change |
+| `keepModelLoaded` | boolean | `true` | Keep the Python worker/model in memory between dictations, with microphone closed when idle |
+| `preloadModel` | boolean | `false` | Preload in the background on interactive startup, without opening the microphone. Requires retention |
+| `voiceShortcut` | string | `"ctrl+r"` | `"ctrl+r"`, `"ctrl+n"`, `"ctrl+space"`, or `"off"`. Reload/restart Pi after changing |
 
-There are no other keys. A hand-written file looks like this:
+A hand-written file looks like this:
 
 ```json
 {
@@ -44,9 +47,7 @@ There are no other keys. A hand-written file looks like this:
 }
 ```
 
-Only non-default values are persisted — the filter key lands on disk only when it is
-`false`, the equalizer key only when it is `true`. A default-settings install therefore
-writes `{}`, and an absent key always means "the default", never "unset".
+Only non-default values are persisted. A default-settings install writes `{}`: the model loads on first dictation, stays loaded between dictations, and Ctrl+R toggles dictation. An absent key means "the default", never "unset".
 
 `numThreads` is the exception in how it gets on disk: the settings screen never writes
 it (the row is read-only), so a hand-added value stays until you remove it. Every
@@ -55,7 +56,7 @@ overlay — and it takes effect the next time you run `/voice`.
 
 ## The settings screen
 
-`Tab` from dictation opens a five-row panel:
+`Tab` from dictation opens the settings panel:
 
 | Row | Kind | Value |
 | --- | --- | --- |
@@ -63,13 +64,15 @@ overlay — and it takes effect the next time you run `/voice`.
 | Language | read-only | the endonym of your active locale (`Deutsch`, `Русский`, `中文`, …) or `Auto-detect`. Hint: `Run /languages to change.` |
 | Filter Whisper noise | toggle | `[ on ]` / `[ off ]` — writes `hallucinationFilterEnabled` |
 | Equalizer | toggle | `[ on ]` / `[ off ]` — writes `equalizerEnabled` |
-| Threads | read-only | the decode thread count baked at `/voice` start. Hint: `Set numThreads in voice.json; re-run /voice to apply.` |
+| CPU threads (fallback) | read-only | CPU thread count; set `numThreads` in JSON |
+| Keep model loaded | toggle | Reuse the model between dictations; disabling releases it at dictation end |
+| Preload on startup | toggle | Warm at next interactive startup, without recording; off means lazy loading |
+| Voice shortcut | cycle | Enter cycles Ctrl+R, Ctrl+N, Ctrl+Space, off; reload/restart to apply |
 
-Only the two toggles take focus. `Ctrl-S` saves and confirms; `Esc` and `Tab` save
+The filter, equalizer, lifetime, preload and shortcut rows take focus. `Ctrl-S` saves and confirms; `Esc` and `Tab` save
 silently on the way out. See [keybindings.md](./keybindings.md) for the full key table.
 
-The filter toggle takes effect immediately in the running session. The equalizer toggle
-is view-only and appears under the transcript as soon as you flip back.
+The filter toggle takes effect immediately. The equalizer is view-only. Retention is re-read when dictation closes, so disabling it frees the model at that point. Enabling preload also enables retention; disabling retention disables preload. Preload applies on the next interactive startup. Shortcut changes apply after `/reload` or restart; until then, the originally registered shortcut remains active both in the editor and dictation screen.
 
 ## File handling
 

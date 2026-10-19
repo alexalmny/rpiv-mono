@@ -220,12 +220,12 @@ describe("VoiceSession", () => {
 
 			session.dispatchAction({ kind: "open_settings" });
 			const lines = session.component.render(80);
-			// The row line is `  Threads: 8` — the hint line mentions numThreads
+			// The row line is `  CPU threads (fallback): 8` — the hint line mentions numThreads
 			// too, so assert on the label+value pairing, not the bare label.
-			expect(lines.some((l) => l.includes("Threads: 8"))).toBe(true);
+			expect(lines.some((l) => l.includes("CPU threads (fallback): 8"))).toBe(true);
 			// Fifth row: after the Equalizer row, before the footer chrome.
 			const equalizerIdx = lines.findIndex((l) => l.includes("Equalizer:"));
-			const threadsIdx = lines.findIndex((l) => l.includes("Threads: 8"));
+			const threadsIdx = lines.findIndex((l) => l.includes("CPU threads (fallback): 8"));
 			expect(threadsIdx).toBeGreaterThan(equalizerIdx);
 		});
 
@@ -239,7 +239,7 @@ describe("VoiceSession", () => {
 
 			session.dispatchAction({ kind: "open_settings" });
 			const lines = session.component.render(80);
-			expect(lines.some((l) => l.includes("Threads: 4"))).toBe(true);
+			expect(lines.some((l) => l.includes("CPU threads (fallback): 4"))).toBe(true);
 		});
 	});
 
@@ -310,4 +310,24 @@ describe("VoiceSession", () => {
 			expect(requestRender.requestRender.mock.calls.length).toBeGreaterThan(initialCount);
 		});
 	});
+});
+
+
+it("Ctrl+R finishes actual session state with committed and partial text", () => {
+	const config = makeSessionConfig(makeDeps());
+	const session = new VoiceSession(config);
+	session.dispatchAction({ kind: "audio_transcript_appended", text: "déjà écrit" });
+	session.dispatchAction({ kind: "audio_partial_transcript_set", text: "et dicté" });
+	session.component.handleInput("");
+	expect(config.done).toHaveBeenCalledWith({ intent: "commit", transcript: "déjà écrit et dicté" });
+});
+
+it("renders the model lifetime and shortcut controls in the existing Tab settings", () => {
+	const config = makeSessionConfig(makeDeps());
+	const session = new VoiceSession(config);
+	session.dispatchAction({ kind: "open_settings" });
+	const text = session.component.render(80).join("\n");
+	expect(text).toContain("Keep model loaded: [ on ]");
+	expect(text).toContain("Preload on startup: [ off ]");
+	expect(text).toContain("Voice shortcut: ctrl+r");
 });

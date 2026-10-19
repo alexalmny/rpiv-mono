@@ -111,7 +111,7 @@ describe("reduce", () => {
 		const s = {
 			...freshState(),
 			currentScreen: "settings" as const,
-			settingsDraft: { hallucinationFilterEnabled: true, equalizerEnabled: true },
+			settingsDraft: { hallucinationFilterEnabled: true, equalizerEnabled: true, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const },
 		};
 		const r = reduce(s, { kind: "close_settings" }, ctx);
 		expect(r.state.currentScreen).toBe("dictation");
@@ -142,9 +142,9 @@ describe("reduce", () => {
 		const next = reduce(start, { kind: "focus_settings_next" }, ctx);
 		expect(next.state.settingsFocus).toBe("equalizer");
 		const wrap = reduce(next.state, { kind: "focus_settings_next" }, ctx);
-		expect(wrap.state.settingsFocus).toBe("hallucination");
+		expect(wrap.state.settingsFocus).toBe("keepModelLoaded");
 		const prev = reduce(start, { kind: "focus_settings_prev" }, ctx);
-		expect(prev.state.settingsFocus).toBe("equalizer");
+		expect(prev.state.settingsFocus).toBe("voiceShortcut");
 	});
 
 	it("settings_save with all defaults writes an empty config", () => {
@@ -154,7 +154,7 @@ describe("reduce", () => {
 	});
 
 	it("settings_save persists hallucinationFilterEnabled when user disables it", () => {
-		const s = { ...freshState(), settingsDraft: { hallucinationFilterEnabled: false, equalizerEnabled: false } };
+		const s = { ...freshState(), settingsDraft: { hallucinationFilterEnabled: false, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const } };
 		const r = reduce(s, { kind: "settings_save" }, ctx);
 		expect(r.effects).toContainEqual(
 			expect.objectContaining({ kind: "save_config", config: { hallucinationFilterEnabled: false } }),
@@ -162,7 +162,7 @@ describe("reduce", () => {
 	});
 
 	it("settings_save persists equalizerEnabled when user enables it", () => {
-		const s = { ...freshState(), settingsDraft: { hallucinationFilterEnabled: true, equalizerEnabled: true } };
+		const s = { ...freshState(), settingsDraft: { hallucinationFilterEnabled: true, equalizerEnabled: true, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const } };
 		const r = reduce(s, { kind: "settings_save" }, ctx);
 		expect(r.effects).toContainEqual(
 			expect.objectContaining({ kind: "save_config", config: { equalizerEnabled: true } }),
@@ -227,34 +227,35 @@ describe("reduce", () => {
 
 describe("configFromDraft / draftFromConfig", () => {
 	it("draftFromConfig defaults hallucination filter to enabled", () => {
-		expect(draftFromConfig({})).toEqual({ hallucinationFilterEnabled: true, equalizerEnabled: false });
+		expect(draftFromConfig({})).toEqual({ hallucinationFilterEnabled: true, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const });
 	});
 
 	it("draftFromConfig preserves an explicit `false` disable", () => {
-		expect(draftFromConfig({ hallucinationFilterEnabled: false, equalizerEnabled: false })).toEqual({
+		expect(draftFromConfig({ hallucinationFilterEnabled: false, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const })).toEqual({
 			hallucinationFilterEnabled: false,
 			equalizerEnabled: false,
+			keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r",
 		});
 	});
 
 	it("configFromDraft drops both default flags", () => {
-		expect(configFromDraft({ hallucinationFilterEnabled: true, equalizerEnabled: false }, {})).toEqual({});
+		expect(configFromDraft({ hallucinationFilterEnabled: true, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const }, {})).toEqual({});
 	});
 
 	it("configFromDraft persists the off-state of the filter", () => {
-		expect(configFromDraft({ hallucinationFilterEnabled: false, equalizerEnabled: false }, {})).toEqual({
+		expect(configFromDraft({ hallucinationFilterEnabled: false, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const }, {})).toEqual({
 			hallucinationFilterEnabled: false,
 		});
 	});
 
 	it("configFromDraft persists the on-state of the equalizer", () => {
-		expect(configFromDraft({ hallucinationFilterEnabled: true, equalizerEnabled: true }, {})).toEqual({
+		expect(configFromDraft({ hallucinationFilterEnabled: true, equalizerEnabled: true, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const }, {})).toEqual({
 			equalizerEnabled: true,
 		});
 	});
 
 	it("configFromDraft passes non-owned keys through untouched (numThreads, language, future keys)", () => {
-		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false };
+		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const };
 		expect(configFromDraft(draft, { numThreads: 8, language: "uk" } as VoiceConfig)).toEqual({
 			numThreads: 8,
 			language: "uk",
@@ -262,7 +263,7 @@ describe("configFromDraft / draftFromConfig", () => {
 	});
 
 	it("configFromDraft is draft-authoritative for owned keys — a default draft drops persisted owned non-defaults", () => {
-		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false };
+		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const };
 		expect(
 			configFromDraft(draft, {
 				hallucinationFilterEnabled: false,
@@ -273,7 +274,7 @@ describe("configFromDraft / draftFromConfig", () => {
 	});
 
 	it("configFromDraft merges pass-through keys with draft-derived owned keys", () => {
-		const draft = { hallucinationFilterEnabled: false, equalizerEnabled: false };
+		const draft = { hallucinationFilterEnabled: false, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const };
 		expect(configFromDraft(draft, { numThreads: 8, language: "uk" } as VoiceConfig)).toEqual({
 			numThreads: 8,
 			language: "uk",
@@ -282,7 +283,7 @@ describe("configFromDraft / draftFromConfig", () => {
 	});
 
 	it("configFromDraft skips a hand-edited __proto__ key instead of tripping the prototype setter", () => {
-		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false };
+		const draft = { hallucinationFilterEnabled: true, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const };
 		// JSON.parse surfaces __proto__ as an own-enumerable key; a computed
 		// assignment would replace the accumulator's prototype rather than
 		// round-trip the key.
@@ -296,6 +297,51 @@ describe("configFromDraft / draftFromConfig", () => {
 		expect(draftFromConfig({ equalizerEnabled: true })).toEqual({
 			hallucinationFilterEnabled: true,
 			equalizerEnabled: true,
+			keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r",
 		});
 	});
+});
+
+
+describe("runtime settings", () => {
+	it("defaults to lazy loading, model retention and a two-key Ctrl+R shortcut", () => {
+		expect(draftFromConfig({})).toMatchObject({ keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" });
+	});
+
+	it("disabling retention also disables startup preload", () => {
+		const state = { ...freshState(), settingsFocus: "keepModelLoaded" as const,
+			settingsDraft: draftFromConfig({ preloadModel: true }) };
+		const next = reduce(state, { kind: "toggle_focused_setting" }, ctx).state;
+		expect(next.settingsDraft).toMatchObject({ keepModelLoaded: false, preloadModel: false });
+		expect(configFromDraft(next.settingsDraft, {})).toEqual({ keepModelLoaded: false });
+	});
+
+	it("enabling startup preload enables retention", () => {
+		const state = { ...freshState(), settingsFocus: "preloadModel" as const,
+			settingsDraft: draftFromConfig({ keepModelLoaded: false }) };
+		const next = reduce(state, { kind: "toggle_focused_setting" }, ctx).state;
+		expect(next.settingsDraft).toMatchObject({ keepModelLoaded: true, preloadModel: true });
+		expect(configFromDraft(next.settingsDraft, {})).toEqual({ preloadModel: true });
+	});
+
+	it("cycles the shortcut and persists it without dropping JSON-only keys", () => {
+		let state = { ...freshState(), settingsFocus: "voiceShortcut" as const };
+		for (const expected of ["ctrl+n", "ctrl+space", "off", "ctrl+r"]) {
+			state = reduce(state, { kind: "toggle_focused_setting" }, ctx).state as typeof state;
+			expect(state.settingsDraft.voiceShortcut).toBe(expected);
+			const saved = configFromDraft(state.settingsDraft, { numThreads: 8, voiceShortcut: "off" });
+			expect(saved).toEqual(expected === "ctrl+r" ? { numThreads: 8 } : { numThreads: 8, voiceShortcut: expected });
+		}
+	});
+});
+
+
+it("finishing from settings persists the draft before pasting", () => {
+	const state = { ...freshState(), currentScreen: "settings" as const,
+		settingsDraft: draftFromConfig({ voiceShortcut: "ctrl+n" }), transcript: "dicté" };
+	const result = reduce(state, { kind: "commit" }, ctx);
+	expect(result.effects).toEqual([
+		{ kind: "save_config", config: { voiceShortcut: "ctrl+n" } },
+		{ kind: "done", result: { intent: "commit", transcript: "dicté" } },
+	]);
 });

@@ -156,3 +156,15 @@ describe("faster-whisper worker bridge", () => {
 		await decode;
 	});
 });
+
+
+it("notifies the cache exactly once when a worker is stopped", async () => {
+	const onStop = vi.fn();
+	const pending = createSttEngine({ onStop });
+	worker.send({ kind: "ready", model: "base", device: "cuda" });
+	const engine = await pending;
+	engine.release();
+	engine.release();
+	worker.emit("exit", 1);
+	expect(onStop).toHaveBeenCalledOnce();
+});

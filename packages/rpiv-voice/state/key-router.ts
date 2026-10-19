@@ -27,6 +27,7 @@ export type VoiceAction =
 
 export function routeKey(data: string, state: VoiceState, runtime: VoiceRuntime): VoiceAction {
 	const kb = runtime.keybindings;
+	if (runtime.shortcut && runtime.shortcut !== "off" && matchesKey(data, runtime.shortcut)) return { kind: "commit" };
 
 	if (state.currentScreen === "settings") {
 		if (data === CTRL_S) return { kind: "settings_save" };

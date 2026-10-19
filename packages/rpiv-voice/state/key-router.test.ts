@@ -104,3 +104,22 @@ describe("routeKey — cancel honors user keybinding remap", () => {
 		expect(routeKey("\x07", settingsState, remappedRuntime())).toEqual({ kind: "close_settings" });
 	});
 });
+
+
+describe("two-key dictation toggle", () => {
+	it("the configured shortcut finishes dictation just like Enter", () => {
+		expect(routeKey("", freshState(), { keybindings: kb, shortcut: "ctrl+r" })).toEqual({ kind: "commit" });
+		expect(routeKey("", freshState(), { keybindings: kb, shortcut: "ctrl+n" })).toEqual({ kind: "commit" });
+	});
+	it("does not respond to an unconfigured or disabled shortcut", () => {
+		expect(routeKey("", freshState(), { keybindings: kb, shortcut: "ctrl+n" })).toEqual({ kind: "ignore" });
+		expect(routeKey("", freshState(), { keybindings: kb, shortcut: "off" })).toEqual({ kind: "ignore" });
+	});
+});
+
+
+it("the toggle also stops from settings; Ctrl+Space supports legacy terminal input", () => {
+	const state = { ...freshState(), currentScreen: "settings" as const };
+	expect(routeKey(String.fromCharCode(18), state, { keybindings: kb, shortcut: "ctrl+r" })).toEqual({ kind: "commit" });
+	expect(routeKey(String.fromCharCode(0), freshState(), { keybindings: kb, shortcut: "ctrl+space" })).toEqual({ kind: "commit" });
+});

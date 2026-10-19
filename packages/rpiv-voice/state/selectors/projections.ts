@@ -115,8 +115,29 @@ export const selectLanguageReadonlyFieldProps: GlobalSelector<SettingsFieldViewP
 // The value is the raw count as a string; the hint points at voice.json
 // because the settings screen cannot edit the key (JSON-only, restart-to-apply).
 export const selectNumThreadsReadonlyFieldProps: GlobalSelector<SettingsFieldViewProps> = (state, _ctx) => ({
-	label: t("settings.threads_label", "Threads"),
+	label: t("settings.cpu_threads_label", "CPU threads (fallback)"),
 	active: false,
 	field: { kind: "readonly", value: String(state.numThreads) },
-	hint: t("settings.threads_hint", "Set numThreads in voice.json; re-run /voice to apply."),
+	hint: t("settings.threads_hint", "Set numThreads in voice.json; applies when the model is next loaded."),
+});
+
+export const selectKeepModelLoadedFieldProps: GlobalSelector<SettingsFieldViewProps> = (state) => ({
+	label: t("settings.keep_model_loaded_label", "Keep model loaded"),
+	active: state.settingsFocus === "keepModelLoaded",
+	field: { kind: "toggle", enabled: state.settingsDraft.keepModelLoaded },
+	hint: "Reuse the model between dictations. Microphone stays off when idle.",
+});
+
+export const selectPreloadModelFieldProps: GlobalSelector<SettingsFieldViewProps> = (state) => ({
+	label: t("settings.preload_model_label", "Preload on startup"),
+	active: state.settingsFocus === "preloadModel",
+	field: { kind: "toggle", enabled: state.settingsDraft.preloadModel },
+	hint: "Off: load on first dictation. On: warm at next startup, without recording.",
+});
+
+export const selectVoiceShortcutFieldProps: GlobalSelector<SettingsFieldViewProps> = (state) => ({
+	label: t("settings.voice_shortcut_label", "Voice shortcut"),
+	active: state.settingsFocus === "voiceShortcut",
+	field: { kind: "readonly", value: state.settingsDraft.voiceShortcut },
+	hint: "Enter cycles Ctrl+R / Ctrl+N / Ctrl+Space / off. Reload Pi to apply.",
 });

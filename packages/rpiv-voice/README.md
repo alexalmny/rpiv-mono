@@ -3,7 +3,7 @@
 This fork keeps [rpiv-voice](https://github.com/juicesharp/rpiv-mono)'s `/voice` interface and Decibri microphone capture, replacing sherpa-onnx with **faster-whisper and multilingual Whisper Base**.
 
 - Local speech recognition: microphone audio is never uploaded.
-- One Python worker stays model-loaded for the entire dictation session, including live partial previews.
+- One Python worker loads the model on first dictation and keeps it in memory between dictations by default. The microphone is closed whenever dictation ends.
 - Automatically uses NVIDIA CUDA with `int8_float16`, or CPU `int8` if CUDA initialization or inference fails.
 - On Windows, reuses CUDA/cuDNN DLLs from an installed Torch package when available, without importing Torch.
 - Greedy decoding (`beam_size=1`), no word timestamps, no previous-segment conditioning, and no redundant second VAD pass.
@@ -32,17 +32,24 @@ The first run uses an existing Hugging Face cached `Systran/faster-whisper-base`
 
 | Key | Action |
 | --- | --- |
+| Ctrl+R | Start dictation; press again to stop and paste, without sending |
 | `/voice` | Open dictation |
 | Enter | Finish dictation and paste the transcript into Pi's editor; does not send it |
 | Esc | Discard dictation |
 | Space | Pause/resume transcription |
 | Tab | Open settings |
 
-Pi's remapped confirm/cancel keys are respected. Live partials update about once a second; phrase boundaries commit final text. The model is loaded when `/voice` opens and released when it closes. Shutdown/reload also terminates active workers.
+Pi's remapped confirm/cancel keys are respected. Live partials update about once a second; phrase boundaries commit final text. The first dictation loads Base; subsequent dictations reuse the same worker. Closing or cancelling dictation always closes its microphone. Shutdown/reload releases the model. Changing the language hint or CPU thread count reloads it on the next dictation; a crashed worker is evicted so the next attempt can recover.
 
 ## Settings and diagnostics
 
-Settings are unchanged: `~/.config/rpiv-voice/voice.json` (or the XDG config path) supports `hallucinationFilterEnabled`, `equalizerEnabled` and JSON-only `numThreads` (default 4, range 1–16). Threads primarily affect CPU inference.
+Open `/voice` (or Ctrl+R), then **Tab** for settings. Arrow keys select a row; Enter changes it. Esc/Tab saves and returns; Ctrl+S saves with confirmation.
+
+- **Keep model loaded**: on by default. Off releases the model after each dictation, freeing its GPU/CPU memory.
+- **Preload on startup**: off by default. On warms Base in the background on the next interactive session start, without opening the microphone. Enabling this also enables retention; disabling retention disables preload.
+- **Voice shortcut**: Enter cycles **Ctrl+R**, **Ctrl+N**, **Ctrl+Space**, and **off**. Run `/reload` or restart Pi after changing it. These apply inside Pi, not as system-wide hotkeys; terminal/user keybindings or another extension can still intercept a key.
+
+These are persisted as `keepModelLoaded`, `preloadModel` and `voiceShortcut` in `~/.config/rpiv-voice/voice.json` (or the XDG config path), alongside the existing filter/equalizer settings. `numThreads` remains JSON-only (default 4, range 1–16), now labelled **CPU threads (fallback)**.
 
 Language follows the optional rpiv-i18n locale, or is auto-detected per utterance if that package is absent. The multilingual Base model is fixed.
 

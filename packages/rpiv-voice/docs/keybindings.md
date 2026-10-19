@@ -3,6 +3,12 @@
 Every key the `/voice` overlay reacts to, on both of its screens, and what the footer
 hint line is telling you at the time.
 
+## Dictation shortcut
+
+**Ctrl+R** from Pi's main editor starts dictation. Press it again in the dictation or settings screen to stop and paste the transcript, without sending the message. Existing editor text is preserved by Pi's custom-screen mechanism. You must keep Pi focused; this is not a system-wide shortcut.
+
+In Tab settings, select **Voice shortcut** and press Enter to cycle Ctrl+R, Ctrl+N, Ctrl+Space, or off. Save, then `/reload` or restart to apply. Pi/terminal key remaps and other extensions can conflict; use another offered key if necessary.
+
 ## The two screens
 
 `/voice` opens on the **dictation** screen. `Tab` flips to the **settings** screen and
@@ -13,7 +19,7 @@ keeps running and the session timer keeps counting while you are in settings.
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Close the overlay and paste the transcript into Pi's editor |
+| `Enter` or configured shortcut | Close the overlay and paste the transcript into Pi's editor, without sending |
 | `Esc` | Close the overlay and paste nothing |
 | `Space` | Pause / resume |
 | `Tab` | Open the settings screen |
@@ -27,16 +33,16 @@ Any other keystroke is ignored — there is no text input on this screen.
 
 | Key | Action |
 | --- | --- |
-| `↑` / `↓` | Move focus between the two toggles. Wraps at both ends |
-| `Enter` | Toggle the focused setting |
+| `↑` / `↓` | Move focus between editable settings. Wraps at both ends |
+| `Enter` | Toggle the focused setting, or cycle the shortcut |
+| Configured shortcut | Save settings, finish dictation, and paste without sending |
 | `Ctrl-S` | Save to disk and confirm with a `Voice settings saved` notification |
 | `Esc` | Return to dictation |
 | `Tab` | Return to dictation |
 
 Footer: `↑↓ to select · Enter to toggle · Ctrl-S to save · Esc to go back`.
 
-Focus starts on **Filter Whisper noise** and cycles between it and **Equalizer**. The
-**Microphone**, **Language**, and **Threads** rows are read-only and are skipped by focus.
+Focus starts on **Filter Whisper noise**, followed by **Equalizer**, **Keep model loaded**, **Preload on startup**, and **Voice shortcut**. **Microphone**, **Language**, and **CPU threads (fallback)** are read-only and skipped by focus.
 
 `Esc` and `Tab` persist your changes silently on the way out, so a
 toggle-then-leave flow never loses the change. `Ctrl-S` is the explicit path that also

@@ -1,9 +1,14 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { appendErrorLog } from "../audio/error-log.ts";
 import { createMic, type DecibriLike } from "../audio/mic-source.ts";
-import { createSttEngine, type SttEngine } from "../audio/stt-engine.ts";
+import { SttCache } from "../audio/stt-cache.ts";
+import type { SttEngine } from "../audio/stt-engine.ts";
 import {
 	isHallucinationFilterEnabled,
+	isModelKeptLoaded,
+	shouldPreloadModel,
+	resolveVoiceShortcut,
+	type VoiceShortcut,
 	loadVoiceConfig,
 	resolveNumThreads,
 	type VoiceConfig,
@@ -66,14 +71,68 @@ interface Preflight {
 }
 
 export function registerVoiceCommand(pi: ExtensionAPI): void {
+	const models = new SttCache();
+	const shortcut = resolveVoiceShortcut(loadVoiceConfig());
+	let busy = false;
+	let shutdown = false;
+	let generation = 0;
+	let cancelSession: (() => void) | undefined;
+	const start = async (ctx: ExtensionContext): Promise<void> => {
+		if (busy || shutdown) return;
+		busy = true;
+		const startedIn = generation;
+		try {
+			await handleVoiceCommand(
+				ctx, models, shortcut, () => shutdown || generation !== startedIn,
+				(cancel) => { cancelSession = cancel; },
+			);
+		} finally {
+			busy = false;
+		}
+	};
 	pi.registerCommand(VOICE_COMMAND_NAME, {
 		description: t("command.description", "Dictate text with your voice — local STT, no cloud"),
-		handler: (_args: string, ctx: ExtensionCommandContext) => handleVoiceCommand(ctx),
+		handler: (_args, ctx) => start(ctx),
+	});
+	if (shortcut !== "off") {
+		pi.registerShortcut(shortcut, {
+			description: "Toggle local voice dictation",
+			handler: start,
+		});
+	}
+	pi.on("session_start", (_event, ctx) => {
+		shutdown = false;
+		const startedIn = ++generation;
+		const config = loadVoiceConfig();
+		if (ctx.mode !== "tui" || !shouldPreloadModel(config)) return;
+		void models.get(engineConfig(config)).catch((error) => {
+			appendErrorLog("stt.preload", error);
+			if (!shutdown && generation === startedIn) ctx.ui.notify("Voice model preload failed; retry with /voice.", "error");
+		});
+	});
+	pi.on("session_shutdown", () => {
+		shutdown = true;
+		generation++;
+		try {
+			cancelSession?.();
+		} finally {
+			models.release();
+		}
 	});
 }
 
-async function handleVoiceCommand(ctx: ExtensionCommandContext): Promise<void> {
-	if (!ctx.hasUI) {
+function engineConfig(config: VoiceConfig) {
+	return {
+		language: whisperLanguageForLocale(getActiveLocale()),
+		numThreads: resolveNumThreads(config),
+	};
+}
+
+async function handleVoiceCommand(
+	ctx: ExtensionContext, models: SttCache, shortcut: VoiceShortcut, isShutdown: () => boolean,
+	setCancel: (cancel?: () => void) => void,
+): Promise<void> {
+	if (!ctx.hasUI || ctx.mode !== "tui") {
 		ctx.ui.notify(t("error.requires_interactive", "/voice requires interactive mode"), "error");
 		return;
 	}
@@ -82,14 +141,18 @@ async function handleVoiceCommand(ctx: ExtensionCommandContext): Promise<void> {
 	// the dictation session (VoiceSession's persistedConfig, the hallucination
 	// filter default) must read the same load, so it happens once, here.
 	// Settings saves are the exception — they re-read the file at save time so
-	// mid-session hand edits of JSON-only keys round-trip.
+	// mid-session hand edits of JSON-only keys round-trip. Retention is read
+	// again on close so a setting changed inside this session takes effect.
 	const persistedConfig = loadVoiceConfig();
 
-	const preflight = await runPreflight(ctx, persistedConfig);
+	const preflight = await runPreflight(ctx, persistedConfig, models, isShutdown);
 	if (!preflight) return;
 
 	try {
-		const result = await runDictationSession(ctx, preflight.sttEngine, preflight.mic, persistedConfig);
+		if (isShutdown()) return;
+		const result = await runDictationSession(
+			ctx, preflight.sttEngine, preflight.mic, persistedConfig, shortcut, models, setCancel,
+		);
 		if (result.intent === "commit" && result.transcript) {
 			ctx.ui.pasteToEditor(result.transcript);
 		}
@@ -97,28 +160,35 @@ async function handleVoiceCommand(ctx: ExtensionCommandContext): Promise<void> {
 		try {
 			preflight.mic.stop();
 		} finally {
-			preflight.sttEngine.release();
+			if (!isModelKeptLoaded(loadVoiceConfig())) models.release();
 		}
 	}
 }
 
-async function runPreflight(ctx: ExtensionCommandContext, persistedConfig: VoiceConfig): Promise<Preflight | null> {
+async function runPreflight(
+	ctx: ExtensionContext, persistedConfig: VoiceConfig, models: SttCache, isShutdown: () => boolean,
+): Promise<Preflight | null> {
 	let sttEngine: SttEngine | undefined;
 	const status: { stage: "engine" | "mic" } = { stage: "engine" };
 	try {
 		return await runWithSplash<Preflight>(ctx, { initialPhase: { kind: "loading_engine" } }, async (controller) => {
-			sttEngine = await createSttEngine({
-				language: whisperLanguageForLocale(getActiveLocale()),
-				numThreads: resolveNumThreads(persistedConfig),
+			sttEngine = await models.get({
+				...engineConfig(persistedConfig),
 				onProgress: (message) => controller.setPhase({ kind: "downloading", message }),
 			});
+			if (isShutdown()) throw new Error("Voice session shut down");
 			status.stage = "mic";
 			controller.setPhase({ kind: "initializing_mic" });
 			const mic = await createMic();
+			if (isShutdown()) {
+				mic.stop();
+				throw new Error("Voice session shut down");
+			}
 			return { sttEngine, mic };
 		});
 	} catch (error) {
-		sttEngine?.release();
+		if (!isModelKeptLoaded(persistedConfig)) models.release();
+		if (isShutdown()) return null;
 		appendErrorLog(`stt.preflight.${status.stage}`, error);
 		ctx.ui.notify(
 			status.stage === "mic"
@@ -131,10 +201,13 @@ async function runPreflight(ctx: ExtensionCommandContext, persistedConfig: Voice
 }
 
 async function runDictationSession(
-	ctx: ExtensionCommandContext,
+	ctx: ExtensionContext,
 	sttEngine: SttEngine,
 	mic: DecibriLike,
 	persistedConfig: VoiceConfig,
+	shortcut: VoiceShortcut,
+	models: SttCache,
+	setCancel: (cancel?: () => void) => void,
 ): Promise<VoiceResult> {
 	const controller = new AbortController();
 
@@ -147,6 +220,7 @@ async function runDictationSession(
 				tui,
 				theme,
 				persistedConfig,
+				shortcut,
 				deps: {
 					pasteToEditor: (text) => ctx.ui.pasteToEditor(text),
 					notify: (message, level) => ctx.ui.notify(message, level),
@@ -157,6 +231,7 @@ async function runDictationSession(
 				},
 				done,
 			});
+			setCancel(() => session.dispatchAction({ kind: "cancel" }));
 			pipelineHandle = startDictationPipeline(mic, sttEngine, session, controller.signal, {
 				hallucinationFilterEnabled: isHallucinationFilterEnabled(persistedConfig),
 			});
@@ -186,6 +261,7 @@ async function runDictationSession(
 			// first and the pipeline short-circuits the drain fire-and-forget.
 			pipelineHandle?.stop();
 			const drained = await boundedDrain(pipelineHandle?.finalTranscriptPromise);
+			if (drained === undefined) models.release();
 			if (drained && !result.transcript.startsWith(drained)) {
 				finalResult = { ...result, transcript: drained };
 			}
@@ -193,6 +269,7 @@ async function runDictationSession(
 		if (!controller.signal.aborted) controller.abort();
 		return finalResult;
 	} finally {
+		setCancel(undefined);
 		if (pulseTick) clearInterval(pulseTick);
 		if (!controller.signal.aborted) controller.abort();
 	}

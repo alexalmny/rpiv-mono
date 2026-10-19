@@ -1,4 +1,13 @@
-import { isEqualizerEnabled, isHallucinationFilterEnabled, type VoiceConfig } from "../config/voice-config.ts";
+import {
+	DEFAULT_VOICE_SHORTCUT,
+	isEqualizerEnabled,
+	isHallucinationFilterEnabled,
+	isModelKeptLoaded,
+	resolveVoiceShortcut,
+	shouldPreloadModel,
+	VOICE_SHORTCUTS,
+	type VoiceConfig,
+} from "../config/voice-config.ts";
 import { t } from "./i18n-bridge.ts";
 import type { VoiceAction } from "./key-router.ts";
 import { SETTINGS_FIELD_ORDER, type SettingsDraft, type SettingsFieldKey, type VoiceState } from "./state.ts";
@@ -84,16 +93,18 @@ const togglePause: Handler<"toggle_pause"> = (state, _action, _ctx) => {
 // "proper" final decode here would add 0.5–2 s of latency between Enter and
 // paste; the visible partial is already a complete utterance from Whisper's
 // perspective, just one without the trailing-silence padding.
-const commit: Handler<"commit"> = (state, _action, _ctx) => {
+const commit: Handler<"commit"> = (state, _action, ctx) => {
 	const merged = state.partialTranscript
 		? state.transcript
 			? `${state.transcript} ${state.partialTranscript}`
 			: state.partialTranscript
 		: state.transcript;
-	return {
-		state,
-		effects: [{ kind: "done", result: { intent: "commit", transcript: merged } }],
-	};
+	const effects: Effect[] = [];
+	if (state.currentScreen === "settings") {
+		effects.push({ kind: "save_config", config: configFromDraft(state.settingsDraft, ctx.readPersistedConfig()) });
+	}
+	effects.push({ kind: "done", result: { intent: "commit", transcript: merged } });
+	return { state, effects };
 };
 
 const cancel: Handler<"cancel"> = (state, _action, _ctx) => ({
@@ -126,6 +137,37 @@ const toggleFocusedSetting: Handler<"toggle_focused_setting"> = (state, _action,
 			effects: [{ kind: "set_hallucination_filter", enabled }, { kind: "request_render" }],
 		};
 	}
+	if (focus === "keepModelLoaded") {
+		const enabled = !state.settingsDraft.keepModelLoaded;
+		return {
+			state: { ...state, settingsDraft: {
+				...state.settingsDraft,
+				keepModelLoaded: enabled,
+				preloadModel: enabled && state.settingsDraft.preloadModel,
+			} },
+			effects: [{ kind: "request_render" }],
+		};
+	}
+	if (focus === "preloadModel") {
+		const enabled = !state.settingsDraft.preloadModel;
+		return {
+			state: { ...state, settingsDraft: {
+				...state.settingsDraft,
+				preloadModel: enabled,
+				keepModelLoaded: enabled || state.settingsDraft.keepModelLoaded,
+			} },
+			effects: [{ kind: "request_render" }],
+		};
+	}
+	if (focus === "voiceShortcut") {
+		const index = VOICE_SHORTCUTS.indexOf(state.settingsDraft.voiceShortcut);
+		const voiceShortcut = VOICE_SHORTCUTS[(index + 1) % VOICE_SHORTCUTS.length]!;
+		return {
+			state: { ...state, settingsDraft: { ...state.settingsDraft, voiceShortcut } },
+			effects: [{ kind: "request_render" }],
+		};
+	}
+
 	// equalizer toggle is purely view-side: no pipeline reconfig needed, the
 	// view reads the draft directly to decide whether to render its row pair.
 	const enabled = !state.settingsDraft.equalizerEnabled;
@@ -201,7 +243,7 @@ export function reduce(state: VoiceState, action: VoiceAction, ctx: ApplyContext
 // replaced by the draft-derived one (or dropped at default). Every other
 // persisted key (numThreads, language, and any future JSON-only key) is
 // pass-through: a settings save must never drop config the screen cannot edit.
-export const DRAFT_OWNED_CONFIG_KEYS: ReadonlySet<string> = new Set(["hallucinationFilterEnabled", "equalizerEnabled"]);
+export const DRAFT_OWNED_CONFIG_KEYS: ReadonlySet<string> = new Set(["hallucinationFilterEnabled", "equalizerEnabled", "keepModelLoaded", "preloadModel", "voiceShortcut"]);
 
 export function configFromDraft(draft: SettingsDraft, persisted: VoiceConfig): VoiceConfig {
 	// Widened accumulator: pass-through keys may fall outside VoiceConfig's
@@ -220,6 +262,9 @@ export function configFromDraft(draft: SettingsDraft, persisted: VoiceConfig): V
 	// on-state does. Both rules keep voice.json minimal and forward-compatible.
 	if (draft.hallucinationFilterEnabled === false) out.hallucinationFilterEnabled = false;
 	if (draft.equalizerEnabled === true) out.equalizerEnabled = true;
+	if (draft.keepModelLoaded === false) out.keepModelLoaded = false;
+	if (draft.preloadModel === true && draft.keepModelLoaded !== false) out.preloadModel = true;
+	if (draft.voiceShortcut && draft.voiceShortcut !== DEFAULT_VOICE_SHORTCUT) out.voiceShortcut = draft.voiceShortcut;
 	return out;
 }
 
@@ -227,5 +272,8 @@ export function draftFromConfig(config: VoiceConfig): SettingsDraft {
 	return {
 		hallucinationFilterEnabled: isHallucinationFilterEnabled(config),
 		equalizerEnabled: isEqualizerEnabled(config),
+		keepModelLoaded: isModelKeptLoaded(config),
+		preloadModel: shouldPreloadModel(config),
+		voiceShortcut: resolveVoiceShortcut(config),
 	};
 }

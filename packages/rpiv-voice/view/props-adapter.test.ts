@@ -1,3 +1,4 @@
+import { draftFromConfig } from "../state/state-reducer.ts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { BindingContext } from "../state/selectors/contract.ts";
@@ -5,7 +6,7 @@ import { initialVoiceState, type VoiceState } from "../state/state.ts";
 import type { BoundGlobalBinding } from "./component-binding.ts";
 import { VoiceOverlayPropsAdapter } from "./props-adapter.ts";
 
-const DRAFT = { hallucinationFilterEnabled: true, equalizerEnabled: false };
+const DRAFT = draftFromConfig({ equalizerEnabled: false });
 const BASE = initialVoiceState(DRAFT);
 
 function fakeBinding() {

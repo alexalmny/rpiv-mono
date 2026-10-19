@@ -22,6 +22,12 @@ const VOICE_STATE_KEY = Symbol.for("rpiv-voice");
 export interface VoiceConfig {
 	readonly hallucinationFilterEnabled?: boolean;
 	readonly equalizerEnabled?: boolean;
+	/** Keep the model in memory between dictations (default true). */
+	readonly keepModelLoaded?: boolean;
+	/** Warm the model on interactive session start, with microphone off (default false). */
+	readonly preloadModel?: boolean;
+	/** Editor shortcut; changes apply after /reload or restart. */
+	readonly voiceShortcut?: string;
 	/**
 	 * Decode thread count for the STT engine. JSON-only key: the settings
 	 * screen never writes it, and it applies when `/voice` next constructs the
@@ -91,4 +97,23 @@ export function saveVoiceConfig(config: VoiceConfig): boolean {
 export function __resetState(): void {
 	const g = globalThis as unknown as { [k: symbol]: unknown };
 	delete g[VOICE_STATE_KEY];
+}
+
+// These two-key bindings avoid Pi's reserved editor shortcuts by default.
+export const VOICE_SHORTCUTS = ["ctrl+r", "ctrl+n", "ctrl+space", "off"] as const;
+export type VoiceShortcut = (typeof VOICE_SHORTCUTS)[number];
+export const DEFAULT_VOICE_SHORTCUT: VoiceShortcut = "ctrl+r";
+
+export function resolveVoiceShortcut(config: VoiceConfig): VoiceShortcut {
+	return VOICE_SHORTCUTS.includes(config.voiceShortcut as VoiceShortcut)
+		? config.voiceShortcut as VoiceShortcut
+		: DEFAULT_VOICE_SHORTCUT;
+}
+
+export function isModelKeptLoaded(config: VoiceConfig): boolean {
+	return config.keepModelLoaded !== false;
+}
+
+export function shouldPreloadModel(config: VoiceConfig): boolean {
+	return isModelKeptLoaded(config) && config.preloadModel === true;
 }

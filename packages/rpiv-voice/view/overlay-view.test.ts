@@ -1,3 +1,4 @@
+import { draftFromConfig } from "../state/state-reducer.ts";
 import type { Component } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
@@ -44,7 +45,7 @@ function withScreen(state: VoiceState, screen: VoiceState["currentScreen"]): Voi
 // in this file exercise the eq-enabled layout because that's the non-trivial
 // chrome anchor. The eq-disabled path is exercised by the equalizer-view
 // tests (component returns []) and the projections tests.
-const DRAFT = { hallucinationFilterEnabled: true, equalizerEnabled: true };
+const DRAFT = draftFromConfig({ equalizerEnabled: true });
 const CHROME = [["DIVIDER"], ["EQ-1"], ["EQ-2"], ["EQ-3"], ["EQ-4"], ["EQ-5"], ["EQ-6"], ["EQ-7"], ["STATUS"]];
 const CHROME_ROWS = CHROME.length;
 

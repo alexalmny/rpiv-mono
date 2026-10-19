@@ -8,6 +8,7 @@ export interface SttEngineConfig {
 	language?: string;
 	numThreads?: number;
 	onProgress?: (message: string) => void;
+	onStop?: () => void;
 }
 
 export interface SttEngine {
@@ -21,7 +22,7 @@ export function releaseAllSttEngines(): void {
 	for (const engine of activeEngines) engine.release();
 }
 
-/** One model-loaded Python worker per dictation session, never per phrase. */
+/** One model-loaded Python worker, reusable across dictations. */
 export async function createSttEngine(config: SttEngineConfig): Promise<SttEngine> {
 	const worker = fileURLToPath(new URL("./faster-whisper-worker.py", import.meta.url));
 	const args = ["-u", worker, "--threads", String(config.numThreads ?? DEFAULT_NUM_THREADS)];
@@ -54,6 +55,7 @@ export async function createSttEngine(config: SttEngineConfig): Promise<SttEngin
 		lines.close();
 		child.kill();
 		activeEngines.delete(engine);
+		config.onStop?.();
 	};
 	const startupTimer = setTimeout(() => stop(new Error("faster-whisper startup timed out")), 300_000);
 	child.stderr.on("data", (chunk: Buffer) => {

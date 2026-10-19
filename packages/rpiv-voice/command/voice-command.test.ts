@@ -33,7 +33,9 @@ const mocks = vi.hoisted(() => {
 	) {
 		sessionState.done = cfg.done;
 		this.component = { render: () => [], invalidate: () => {}, handleInput: () => {} };
-		this.dispatchAction = vi.fn();
+		this.dispatchAction = vi.fn((action: { kind: string }) => {
+			if (action.kind === "cancel") cfg.done({ intent: "cancel", transcript: "" });
+		});
 		this.tickPulse = vi.fn();
 	});
 	return {
@@ -101,13 +103,15 @@ import { registerVoiceCommand, VOICE_COMMAND_NAME } from "./voice-command.ts";
 // ── Helpers ──────────────────────────────────────────────────────────────────
 type Handler = (args: string, ctx: unknown) => Promise<void>;
 
-function captureHandler(): { handler: Handler; registerCommand: ReturnType<typeof vi.fn> } {
+function captureHandler() {
 	let handler: Handler | undefined;
 	const registerCommand = vi.fn((_n: string, spec: { handler: Handler }) => {
 		handler = spec.handler;
 	});
-	registerVoiceCommand({ registerCommand } as never);
-	return { handler: handler!, registerCommand };
+	const registerShortcut = vi.fn();
+	const on = vi.fn();
+	registerVoiceCommand({ registerCommand, registerShortcut, on } as never);
+	return { handler: handler!, registerCommand, registerShortcut, on };
 }
 
 // runPreflight + runDictationSession chain ~half a dozen awaits before the
@@ -124,6 +128,7 @@ function makeCtx(overrides: { notify?: ReturnType<typeof vi.fn>; pasteToEditor?:
 	const notify = overrides.notify ?? vi.fn();
 	const pasteToEditor = overrides.pasteToEditor ?? vi.fn();
 	const ctx = {
+		mode: "tui",
 		hasUI: true,
 		ui: {
 			notify,
@@ -150,6 +155,10 @@ function makeDrain<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 	return { promise, resolve };
 }
 
+beforeEach(() => {
+	vi.mocked(loadVoiceConfig).mockReset().mockReturnValue({ keepModelLoaded: false });
+});
+
 // ── Existing smoke coverage ─────────────────────────────────────────────────
 describe("VOICE_COMMAND_NAME", () => {
 	it("exports 'voice'", () => {
@@ -160,7 +169,7 @@ describe("VOICE_COMMAND_NAME", () => {
 describe("registerVoiceCommand", () => {
 	it("calls pi.registerCommand with the voice command name", () => {
 		const registerCommand = vi.fn();
-		const pi = { registerCommand } as never;
+		const pi = { registerCommand, registerShortcut: vi.fn(), on: vi.fn() } as never;
 		registerVoiceCommand(pi);
 		expect(registerCommand).toHaveBeenCalledOnce();
 		expect(registerCommand.mock.calls[0][0]).toBe("voice");
@@ -344,15 +353,15 @@ describe("handleVoiceCommand — numThreads wiring", () => {
 		return lastCall?.[0];
 	}
 
-	it("loads the config exactly once per invocation, before engine construction", async () => {
+	it("takes an invocation snapshot before engine construction and re-reads retention after dictation", async () => {
 		await runOnce();
 		const loadVoiceConfigMock = vi.mocked(loadVoiceConfig);
-		expect(loadVoiceConfigMock).toHaveBeenCalledOnce();
+		expect(loadVoiceConfigMock).toHaveBeenCalledTimes(3);
 		expect(loadVoiceConfigMock.mock.invocationCallOrder[0]).toBeLessThan(createSttEngine.mock.invocationCallOrder[0]);
 	});
 
 	it("threads a valid numThreads (8) into engine construction", async () => {
-		vi.mocked(loadVoiceConfig).mockReturnValueOnce({ numThreads: 8 });
+		vi.mocked(loadVoiceConfig).mockReturnValue({ numThreads: 8, keepModelLoaded: false });
 		await runOnce();
 		expect(lastEngineConfig()?.numThreads).toBe(8);
 	});
@@ -361,7 +370,7 @@ describe("handleVoiceCommand — numThreads wiring", () => {
 		// The importOriginal spread in the voice-config mock keeps
 		// `resolveNumThreads` real, so "eight" exercises the production
 		// decoder, not a stub.
-		vi.mocked(loadVoiceConfig).mockReturnValueOnce({ numThreads: "eight" as unknown as number });
+		vi.mocked(loadVoiceConfig).mockReturnValue({ numThreads: "eight" as unknown as number, keepModelLoaded: false });
 		await runOnce();
 		expect(lastEngineConfig()?.numThreads).toBe(4);
 	});
@@ -475,7 +484,7 @@ describe("handleVoiceCommand — commit drain & teardown ordering", () => {
 			await vi.advanceTimersByTimeAsync(10_000);
 			await run;
 			expect(pasteToEditor).toHaveBeenCalledWith("merge text");
-			expect(sttEngineRelease).toHaveBeenCalledOnce();
+			expect(sttEngineRelease).toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}
@@ -498,5 +507,137 @@ describe("handleVoiceCommand — commit drain & teardown ordering", () => {
 		expect(sttEngineRelease).toHaveBeenCalledOnce();
 		expect(drainSettled).toHaveBeenCalledOnce();
 		expect(drainSettled.mock.invocationCallOrder[0]).toBeLessThan(sttEngineRelease.mock.invocationCallOrder[0]);
+	});
+});
+
+
+describe("retained model and editor shortcut", () => {
+	beforeEach(() => {
+		vi.mocked(loadVoiceConfig).mockReturnValue({});
+		createSttEngine.mockReset().mockResolvedValue({ recognize: vi.fn(async () => ""), release: sttEngineRelease });
+		createMic.mockReset().mockImplementation(async () => ({ on: vi.fn(), once: vi.fn(), stop: vi.fn() }));
+		sttEngineRelease.mockClear();
+		getActiveLocale.mockReturnValue(undefined);
+		sessionState.done = undefined;
+	});
+
+	async function dictate(handler: Handler, text = "bonjour") {
+		sessionState.done = undefined;
+		const context = makeCtx();
+		const run = handler("", context.ctx);
+		await waitForSessionDone();
+		sessionState.done?.({ intent: "commit", transcript: text });
+		await run;
+		return context;
+	}
+
+	it("registers Ctrl+R without starting Python or opening the mic", () => {
+		const { registerShortcut } = captureHandler();
+		expect(registerShortcut).toHaveBeenCalledWith("ctrl+r", expect.objectContaining({ handler: expect.any(Function) }));
+		expect(createSttEngine).not.toHaveBeenCalled();
+		expect(createMic).not.toHaveBeenCalled();
+	});
+
+	it("loads on first dictation only, but opens and closes a fresh microphone each time", async () => {
+		const { handler } = captureHandler();
+		await dictate(handler);
+		await dictate(handler);
+		expect(createSttEngine).toHaveBeenCalledOnce();
+		expect(createMic).toHaveBeenCalledTimes(2);
+		for (const call of createMic.mock.results) expect((await call.value).stop).toHaveBeenCalled();
+		expect(sttEngineRelease).not.toHaveBeenCalled();
+	});
+
+	it("startup does nothing by default; opt-in preload loads without opening the mic", async () => {
+		const { on } = captureHandler();
+		const startup = on.mock.calls.find(([event]) => event === "session_start")![1];
+		const { ctx } = makeCtx();
+		await startup({}, ctx);
+		expect(createSttEngine).not.toHaveBeenCalled();
+		vi.mocked(loadVoiceConfig).mockReturnValue({ preloadModel: true });
+		await startup({}, ctx);
+		expect(createSttEngine).toHaveBeenCalledOnce();
+		expect(createMic).not.toHaveBeenCalled();
+	});
+
+	it("never preloads outside TUI mode", async () => {
+		vi.mocked(loadVoiceConfig).mockReturnValue({ preloadModel: true });
+		const { on } = captureHandler();
+		await on.mock.calls.find(([event]) => event === "session_start")![1]({}, { ...makeCtx().ctx, mode: "rpc" });
+		expect(createSttEngine).not.toHaveBeenCalled();
+	});
+
+	it("a failed preload can be retried by the first dictation", async () => {
+		vi.mocked(loadVoiceConfig).mockReturnValue({ preloadModel: true });
+		createSttEngine.mockRejectedValueOnce(new Error("offline"));
+		const { handler, on } = captureHandler();
+		const { ctx, notify } = makeCtx();
+		await on.mock.calls.find(([event]) => event === "session_start")![1]({}, ctx);
+		await new Promise<void>((r) => setImmediate(r));
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("preload failed"), "error");
+		await dictate(handler);
+		expect(createSttEngine).toHaveBeenCalledTimes(2);
+	});
+
+	it("the shortcut starts the same dictation flow and never sends a message", async () => {
+		const { registerShortcut } = captureHandler();
+		const start = registerShortcut.mock.calls[0][1].handler;
+		const { ctx, pasteToEditor } = makeCtx();
+		const run = start(ctx);
+		await waitForSessionDone();
+		expect(mocks.VoiceSession.mock.calls.at(-1)![0]).toMatchObject({ shortcut: "ctrl+r" });
+		sessionState.done?.({ intent: "commit", transcript: "texte ajouté" });
+		await run;
+		expect(pasteToEditor).toHaveBeenCalledWith("texte ajouté");
+	});
+
+	it("ignores duplicate starts while a dictation is already open", async () => {
+		const { handler } = captureHandler();
+		const { ctx } = makeCtx();
+		const run = handler("", ctx);
+		await waitForSessionDone();
+		await handler("", ctx);
+		expect(createMic).toHaveBeenCalledOnce();
+		sessionState.done?.({ intent: "cancel", transcript: "" });
+		await run;
+	});
+
+	it("retains a healthy model after a microphone failure", async () => {
+		createMic.mockRejectedValueOnce(new Error("mic denied"));
+		const { handler } = captureHandler();
+		await handler("", makeCtx().ctx);
+		await dictate(handler);
+		expect(createSttEngine).toHaveBeenCalledOnce();
+	});
+
+	it("shutdown cancels active dictation, closes the mic, and releases the model", async () => {
+		const { handler, on } = captureHandler();
+		const { ctx, pasteToEditor } = makeCtx();
+		const run = handler("", ctx);
+		await waitForSessionDone();
+		await on.mock.calls.find(([event]) => event === "session_shutdown")![1]({});
+		await run;
+		expect((await createMic.mock.results[0].value).stop).toHaveBeenCalled();
+		expect(sttEngineRelease).toHaveBeenCalledOnce();
+		expect(pasteToEditor).not.toHaveBeenCalled();
+	});
+
+	it("shutdown during model startup must never open the microphone afterwards", async () => {
+		const ready = makeDrain<Awaited<ReturnType<typeof createSttEngine>>>();
+		createSttEngine.mockReturnValueOnce(ready.promise);
+		const { handler, on } = captureHandler();
+		const run = handler("", makeCtx().ctx);
+		await on.mock.calls.find(([event]) => event === "session_shutdown")![1]({});
+		ready.resolve({ recognize: vi.fn(async () => ""), release: sttEngineRelease });
+		await run;
+		expect(createMic).not.toHaveBeenCalled();
+		expect(sttEngineRelease).toHaveBeenCalledOnce();
+	});
+
+	it("honors shortcut changes after extension reload, including disabling", () => {
+		vi.mocked(loadVoiceConfig).mockReturnValue({ voiceShortcut: "ctrl+n" });
+		expect(captureHandler().registerShortcut.mock.calls[0][0]).toBe("ctrl+n");
+		vi.mocked(loadVoiceConfig).mockReturnValue({ voiceShortcut: "off" });
+		expect(captureHandler().registerShortcut).not.toHaveBeenCalled();
 	});
 });

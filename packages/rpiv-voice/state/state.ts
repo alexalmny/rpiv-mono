@@ -1,13 +1,16 @@
-import { DEFAULT_NUM_THREADS } from "../config/voice-config.ts";
+import { DEFAULT_NUM_THREADS, type VoiceShortcut } from "../config/voice-config.ts";
 
 export type RecordingStatus = "recording" | "paused";
 export type ScreenKind = "dictation" | "settings";
 
-export type SettingsFieldKey = "hallucination" | "equalizer";
+export type SettingsFieldKey = "hallucination" | "equalizer" | "keepModelLoaded" | "preloadModel" | "voiceShortcut";
 
 export interface SettingsDraft {
 	hallucinationFilterEnabled: boolean;
 	equalizerEnabled: boolean;
+	keepModelLoaded: boolean;
+	preloadModel: boolean;
+	voiceShortcut: VoiceShortcut;
 }
 
 export interface VoiceState {
@@ -35,9 +38,10 @@ export interface VoiceState {
 	numThreads: number;
 }
 
-export const SETTINGS_FIELD_ORDER: readonly SettingsFieldKey[] = ["hallucination", "equalizer"];
+export const SETTINGS_FIELD_ORDER: readonly SettingsFieldKey[] = ["hallucination", "equalizer", "keepModelLoaded", "preloadModel", "voiceShortcut"];
 
 export interface VoiceRuntime {
+	shortcut?: VoiceShortcut;
 	keybindings: { matches(data: string, name: string): boolean };
 }
 

@@ -20,13 +20,13 @@ After a complete cache download, inference requires no network. For strict offli
 
 ## Worker and acceleration
 
-One Python subprocess is started when `/voice` opens. It loads Base once, warms up inference, then accepts FIFO-serialized mono 16 kHz float32 audio requests over private stdin/stdout pipes. There is no HTTP server or listening port. Each audio request is bounded to 30 seconds; rpiv's existing segment cap is 12 seconds.
+One Python subprocess is started on the first `/voice` or Ctrl+R dictation, then reused across subsequent dictations by default. Optional `preloadModel` starts it on interactive session startup instead. It loads Base once, warms up inference, then accepts FIFO-serialized mono 16 kHz float32 audio requests over private stdin/stdout pipes. There is no HTTP server or listening port. Each audio request is bounded to 30 seconds; rpiv's existing segment cap is 12 seconds.
 
 The worker chooses CUDA `int8_float16` when a usable NVIDIA GPU exists, otherwise CPU `int8`. GPU warmup failures trigger CPU fallback. A GPU failure during transcription retries that same request on CPU and keeps subsequent requests on CPU. Backend selection/fallback is written to the diagnostic log.
 
 On Windows, if Torch is installed, its `lib` directory is added to DLL lookup and the worker's PATH without importing Torch. This can reuse already-installed CUDA libraries; no CUDA download is performed. Compatibility is still checked by actual inference, not merely by detecting a GPU.
 
-The default executable is `python` from Pi's PATH. Set `RPIV_VOICE_PYTHON` to a full executable path if necessary. `numThreads` controls CPU threads. Startup is bounded to five minutes (including any first download), and an individual decode to one minute. Commit drain keeps the existing ten-second UI bound. Closing/cancelling the session or shutting down Pi terminates the worker and rejects outstanding requests.
+The default executable is `python` from Pi's PATH. Set `RPIV_VOICE_PYTHON` to a full executable path if necessary. `numThreads` controls CPU threads. Startup is bounded to five minutes (including any first download), and an individual decode to one minute. Commit drain keeps the existing ten-second UI bound; a drain timeout evicts the worker so a later dictation can recover. Closing/cancelling dictation always closes the microphone but, by default, keeps the worker and its GPU/CPU memory alive. Set `keepModelLoaded: false` to release it after each dictation. Shutdown/reload terminates every worker, including still-starting ones, and rejects outstanding requests. A failed/exited worker is removed from the cache; the next dictation retries. Changed language hints or CPU thread counts invalidate the cached model.
 
 ## Recognition settings
 

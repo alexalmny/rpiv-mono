@@ -1,3 +1,4 @@
+import { draftFromConfig } from "../state/state-reducer.ts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { BindingContext } from "../state/selectors/contract.ts";
@@ -6,7 +7,7 @@ import { initialVoiceState } from "../state/state.ts";
 import { globalBinding } from "./component-binding.ts";
 import type { StatefulView } from "./stateful-view.ts";
 
-const DRAFT = { hallucinationFilterEnabled: true, equalizerEnabled: false };
+const DRAFT = draftFromConfig({ equalizerEnabled: false });
 const BASE = initialVoiceState(DRAFT);
 const CTX: BindingContext = { activeView: "dictation" };
 

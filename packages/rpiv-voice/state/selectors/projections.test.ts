@@ -1,3 +1,4 @@
+import { draftFromConfig } from "../state-reducer.ts";
 import { describe, expect, it } from "vitest";
 
 import { initialVoiceState, type VoiceState } from "../state.ts";
@@ -14,7 +15,7 @@ import {
 const DICTATION_CTX: BindingContext = { activeView: "dictation" };
 
 function makeState(overrides: Partial<VoiceState> = {}): VoiceState {
-	return { ...initialVoiceState({ hallucinationFilterEnabled: true, equalizerEnabled: false }), ...overrides };
+	return { ...initialVoiceState(draftFromConfig({ equalizerEnabled: false })), ...overrides };
 }
 
 describe("selectStatusBarProps", () => {
@@ -73,9 +74,9 @@ describe("selectNumThreadsReadonlyFieldProps", () => {
 	it("is a readonly field stringifying the default thread count", () => {
 		const props = selectNumThreadsReadonlyFieldProps(makeState({ numThreads: 4 }), DICTATION_CTX);
 		expect(props.active).toBe(false);
-		expect(props.label).toBe("Threads");
+		expect(props.label).toBe("CPU threads (fallback)");
 		expect(props.field).toEqual({ kind: "readonly", value: "4" });
-		expect(props.hint).toBe("Set numThreads in voice.json; re-run /voice to apply.");
+		expect(props.hint).toBe("Set numThreads in voice.json; applies when the model is next loaded.");
 	});
 
 	it("stringifies a non-default thread count the same way — still inactive", () => {
@@ -88,7 +89,7 @@ describe("selectNumThreadsReadonlyFieldProps", () => {
 describe("selectHallucinationFilterFieldProps", () => {
 	it("reflects the current draft toggle state", () => {
 		const onProps = selectHallucinationFilterFieldProps(
-			makeState({ settingsDraft: { hallucinationFilterEnabled: true, equalizerEnabled: false } }),
+			makeState({ settingsDraft: draftFromConfig({ equalizerEnabled: false }) }),
 			DICTATION_CTX,
 		);
 		expect(onProps.label).toBe("Filter Whisper noise");
@@ -97,7 +98,7 @@ describe("selectHallucinationFilterFieldProps", () => {
 		expect(onProps.hint).toContain("silence-segment artifacts");
 
 		const offProps = selectHallucinationFilterFieldProps(
-			makeState({ settingsDraft: { hallucinationFilterEnabled: false, equalizerEnabled: false } }),
+			makeState({ settingsDraft: { hallucinationFilterEnabled: false, equalizerEnabled: false, keepModelLoaded: true, preloadModel: false, voiceShortcut: "ctrl+r" as const } }),
 			DICTATION_CTX,
 		);
 		expect(offProps.field).toEqual({ kind: "toggle", enabled: false });

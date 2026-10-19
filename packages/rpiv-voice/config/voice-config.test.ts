@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadVoiceConfig, resolveNumThreads, saveVoiceConfig } from "./voice-config.ts";
+import { loadVoiceConfig, resolveNumThreads, saveVoiceConfig, isModelKeptLoaded, shouldPreloadModel, resolveVoiceShortcut } from "./voice-config.ts";
 
 const CONFIG_PATH = join(homedir(), ".config", "rpiv-voice", "voice.json");
 
@@ -58,5 +58,24 @@ describe("resolveNumThreads", () => {
 
 	it("clamps integers above 16 to 16", () => {
 		expect(resolveNumThreads({ numThreads: 32 })).toBe(16);
+	});
+});
+
+
+describe("model lifecycle and shortcut defaults", () => {
+	it("retains by default but never preloads without opt-in", () => {
+		expect(isModelKeptLoaded({})).toBe(true);
+		expect(shouldPreloadModel({})).toBe(false);
+		expect(shouldPreloadModel({ preloadModel: true })).toBe(true);
+		expect(shouldPreloadModel({ preloadModel: true, keepModelLoaded: false })).toBe(false);
+	});
+	it("accepts only supported shortcuts, not arbitrary JSON values", () => {
+		expect(resolveVoiceShortcut({})).toBe("ctrl+r");
+		for (const value of ["ctrl+r", "ctrl+n", "ctrl+space", "off"]) {
+			expect(resolveVoiceShortcut({ voiceShortcut: value })).toBe(value);
+		}
+		for (const value of ["ctrl+c", "ctrl+alt+v", "bad", 3, null]) {
+			expect(resolveVoiceShortcut({ voiceShortcut: value as string })).toBe("ctrl+r");
+		}
 	});
 });
